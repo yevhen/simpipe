@@ -8,38 +8,36 @@ import (
 )
 
 func TestExecutesGivenLambdaOnItemReceivedFromChannel(t *testing.T) {
-	res := make([]string, 0)
-
-	var waiter sync.WaitGroup
-	delay := 1 * time.Second
-	f := func(item string) {
-		time.Sleep(delay)
-		res = append(res, item)
-		waiter.Done()
+	result := make(chan string, 2)
+	action := func(item string) {
+		time.Sleep(1 * time.Second)
+		result <- item
 	}
 
-	in := make(chan string)
-	out := make(chan string, 2)
-	go createActionPipe(in, out, 1, f)
+	done := func(item string) {}
 
-	waiter.Add(2)
+	in := make(chan string)
+	go createActionPipe(in, done, 1, action)
+
 	in <- "bar"
 	in <- "baz"
 
-	waiter.Wait()
-	assert.Equal(t, 2, len(res))
-	assert.Contains(t, res, "bar")
-	assert.Contains(t, res, "baz")
+	assert.Equal(t, "bar", <-result)
+	assert.Equal(t, "baz", <-result)
 }
 
-func TestPassesItemAfterExecutionToOutChannel(t *testing.T) {
-	f := func(item *struct{ text string }) {
+func TestPassesItemAfterExecutionToDone(t *testing.T) {
+	action := func(item *struct{ text string }) {
 		item.text += ".test"
 	}
 
+	result := make(chan *struct{ text string }, 2)
+	done := func(item *struct{ text string }) {
+		result <- item
+	}
+
 	in := make(chan *struct{ text string })
-	out := make(chan *struct{ text string }, 2)
-	go createActionPipe(in, out, 1, f)
+	go createActionPipe(in, done, 1, action)
 
 	var i1 struct{ text string }
 	i1.text = "bar"
@@ -50,35 +48,31 @@ func TestPassesItemAfterExecutionToOutChannel(t *testing.T) {
 	in <- &i1
 	in <- &i2
 
-	res := make([]*struct{ text string }, 0)
-	res = append(res, <-out)
-	res = append(res, <-out)
-
-	assert.Equal(t, 2, len(res))
-	assert.Equal(t, "bar.test", res[0].text)
-	assert.Equal(t, "baz.test", res[1].text)
+	assert.Equal(t, "bar.test", (<-result).text)
+	assert.Equal(t, "baz.test", (<-result).text)
 }
 
 func TestDegreeOfParallelism(t *testing.T) {
 	var waiter sync.WaitGroup
 	delay := 1 * time.Second
 
-	f := func(item string) {
+	action := func(item string) {
 		time.Sleep(delay)
 		waiter.Done()
 	}
 
+	done := func(item string) {}
+
 	in := make(chan string)
-	out := make(chan string)
-	go createActionPipe(in, out, 2, f)
+	go createActionPipe(in, done, 2, action)
 
 	now := time.Now()
 
 	waiter.Add(2)
 	in <- "bar"
 	in <- "baz"
-
 	waiter.Wait()
+
 	elapsed := time.Now().Sub(now)
 
 	assert.InDelta(t, delay.Seconds(), elapsed.Seconds(), delay.Seconds()/2)
@@ -86,9 +80,9 @@ func TestDegreeOfParallelism(t *testing.T) {
 
 type ActionPipe[T any] struct {
 	Input       <-chan T
-	Output      chan<- T
+	Done        func(item T)
 	Parallelism int
-	F           func(item T)
+	Action      func(item T)
 }
 
 func (pipe *ActionPipe[T]) Run() {
@@ -99,17 +93,17 @@ func (pipe *ActionPipe[T]) Run() {
 
 func (pipe *ActionPipe[T]) process() {
 	for item := range pipe.Input {
-		pipe.F(item)
-		pipe.Output <- item
+		pipe.Action(item)
+		pipe.Done(item)
 	}
 }
 
-func createActionPipe[T any](in chan T, out chan T, parallelism int, f func(item T)) {
+func createActionPipe[T any](in chan T, done func(item T), parallelism int, action func(item T)) {
 	pipe := ActionPipe[T]{
 		Input:       in,
-		Output:      out,
+		Done:        done,
 		Parallelism: parallelism,
-		F:           f,
+		Action:      action,
 	}
 	pipe.Run()
 }
