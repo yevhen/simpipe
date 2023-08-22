@@ -13,7 +13,7 @@ func TestFlushesBySize(t *testing.T) {
 	}
 
 	in := make(chan string)
-	go createBatchPipe(in, 2, time.Hour, done)
+	go runBatchBlock(in, 2, time.Hour, done)
 
 	in <- "bar"
 	in <- "baz"
@@ -32,7 +32,7 @@ func TestFlushesByTimer(t *testing.T) {
 	flushTimeout := 500 * time.Millisecond
 
 	in := make(chan string)
-	go createBatchPipe(in, 2, flushTimeout, done)
+	go runBatchBlock(in, 2, flushTimeout, done)
 
 	in <- "bar"
 
@@ -49,7 +49,7 @@ func TestDoesNotFlushesByTimerIfFlushedBySize(t *testing.T) {
 	flushTimeout := time.Second
 
 	in := make(chan string, 3)
-	go createBatchPipe(in, 2, flushTimeout, done)
+	go runBatchBlock(in, 2, flushTimeout, done)
 
 	in <- "foo"
 	in <- "bar"
@@ -70,7 +70,7 @@ func TestFlushesOnChannelClose(t *testing.T) {
 	}
 
 	in := make(chan string)
-	go createBatchPipe(in, 2, time.Hour, done)
+	go runBatchBlock(in, 2, time.Hour, done)
 
 	in <- "bar"
 	close(in)
@@ -79,7 +79,7 @@ func TestFlushesOnChannelClose(t *testing.T) {
 	assert.Equal(t, "bar", batch[0])
 }
 
-type BatchPipe[T any] struct {
+type BatchBlock[T any] struct {
 	Input        <-chan T
 	Done         func(batch []T)
 	BatchSize    int
@@ -88,44 +88,49 @@ type BatchPipe[T any] struct {
 	buffer       []T
 }
 
-func (pipe *BatchPipe[T]) Run() {
+func (block *BatchBlock[T]) Run() {
 	go func() {
 		for {
 			select {
-			case item, ok := <-pipe.Input:
+			case item, ok := <-block.Input:
 				if !ok {
-					if len(pipe.buffer) > 0 {
-						pipe.flushBuffer()
+					if len(block.buffer) > 0 {
+						block.flushBuffer()
 						return
 					}
 				}
-				pipe.buffer = append(pipe.buffer, item)
-				if len(pipe.buffer) == pipe.BatchSize {
-					pipe.flushBuffer()
-					pipe.restartTimer()
+				block.buffer = append(block.buffer, item)
+				if len(block.buffer) == block.BatchSize {
+					block.flushBuffer()
+					block.restartTimer()
 				}
-			case <-pipe.timer.C:
-				if len(pipe.buffer) > 0 {
-					pipe.flushBuffer()
+			case <-block.timer.C:
+				if len(block.buffer) > 0 {
+					block.flushBuffer()
 				}
 			}
 		}
 	}()
 }
 
-func (pipe *BatchPipe[T]) flushBuffer() {
-	pipe.Done(pipe.buffer)
-	pipe.buffer = pipe.buffer[:0]
+func (block *BatchBlock[T]) flushBuffer() {
+	block.Done(block.buffer)
+	block.buffer = block.buffer[:0]
 }
 
-func (pipe *BatchPipe[T]) restartTimer() {
-	pipe.timer.Stop()
-	<-pipe.timer.C
-	pipe.timer.Reset(pipe.FlushTimeout)
+func (block *BatchBlock[T]) restartTimer() {
+	block.timer.Stop()
+	<-block.timer.C
+	block.timer.Reset(block.FlushTimeout)
 }
 
-func createBatchPipe[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) {
-	pipe := BatchPipe[T]{
+func runBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) {
+	block := CreateBatchBlock(in, batchSize, flushTimeout, done)
+	block.Run()
+}
+
+func CreateBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) BatchBlock[T] {
+	return BatchBlock[T]{
 		Input:        in,
 		Done:         done,
 		BatchSize:    batchSize,
@@ -133,5 +138,4 @@ func createBatchPipe[T any](in chan T, batchSize int, flushTimeout time.Duration
 		buffer:       make([]T, 0, batchSize),
 		timer:        time.NewTicker(flushTimeout),
 	}
-	pipe.Run()
 }

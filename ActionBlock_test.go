@@ -17,7 +17,7 @@ func TestExecutesGivenLambdaOnItemReceivedFromChannel(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go createActionPipe(in, done, 1, action)
+	go runActionBlock(in, done, 1, action)
 
 	in <- "bar"
 	in <- "baz"
@@ -37,7 +37,7 @@ func TestPassesItemAfterExecutionToDone(t *testing.T) {
 	}
 
 	in := make(chan *struct{ text string })
-	go createActionPipe(in, done, 1, action)
+	go runActionBlock(in, done, 1, action)
 
 	var i1 struct{ text string }
 	i1.text = "bar"
@@ -64,7 +64,7 @@ func TestDegreeOfParallelism(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go createActionPipe(in, done, 2, action)
+	go runActionBlock(in, done, 2, action)
 
 	now := time.Now()
 
@@ -78,32 +78,37 @@ func TestDegreeOfParallelism(t *testing.T) {
 	assert.InDelta(t, delay.Seconds(), elapsed.Seconds(), delay.Seconds()/2)
 }
 
-type ActionPipe[T any] struct {
+type ActionBlock[T any] struct {
 	Input       <-chan T
 	Done        func(item T)
 	Parallelism int
 	Action      func(item T)
 }
 
-func (pipe *ActionPipe[T]) Run() {
-	for i := 0; i < pipe.Parallelism; i++ {
-		go pipe.process()
+func (block *ActionBlock[T]) Run() {
+	for i := 0; i < block.Parallelism; i++ {
+		go block.process()
 	}
 }
 
-func (pipe *ActionPipe[T]) process() {
-	for item := range pipe.Input {
-		pipe.Action(item)
-		pipe.Done(item)
+func (block *ActionBlock[T]) process() {
+	for item := range block.Input {
+		block.Action(item)
+		block.Done(item)
 	}
 }
 
-func createActionPipe[T any](in chan T, done func(item T), parallelism int, action func(item T)) {
-	pipe := ActionPipe[T]{
+func runActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) {
+	block := CreateActionBlock(in, done, parallelism, action)
+	block.Run()
+}
+
+func CreateActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) ActionBlock[T] {
+	block := ActionBlock[T]{
 		Input:       in,
 		Done:        done,
 		Parallelism: parallelism,
 		Action:      action,
 	}
-	pipe.Run()
+	return block
 }
