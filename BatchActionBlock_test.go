@@ -17,7 +17,7 @@ func TestExecutesActionOnBatches(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go RunBatchActionBlock(in, done, 1, 2, time.Hour, action)
+	go RunBatchActionBlock(in, done, 2, time.Hour, 1, action)
 
 	for i := 0; i < itemCount; i++ {
 		in <- fmt.Sprintf("i%d", i+1)
@@ -30,28 +30,71 @@ func TestExecutesActionOnBatches(t *testing.T) {
 	assert.ElementsMatch(t, []string{"i3", "i4"}, batch1)
 }
 
-func RunBatchActionBlock[T any](
+type BatchActionBlock[T any] struct {
+	Input        <-chan T
+	Done         func(item T)
+	BatchSize    int
+	FlushTimeout time.Duration
+	Parallelism  int
+	Action       func(batch []T)
+	batches      chan []T
+	batchBlock   *BatchBlock[T]
+	actionBlock  *ActionBlock[[]T]
+}
+
+func CreateBatchActionBlock[T any](
 	in chan T,
 	done func(item T),
-	parallelism int,
 	batchSize int,
 	flushTimeout time.Duration,
+	parallelism int,
 	action func(batch []T),
-) {
+) BatchActionBlock[T] {
+
 	var batches = make(chan []T)
-	sendToActionBlock := func(batch []T) {
+
+	batchBlock := createInnerBatchBlock(batches, in, batchSize, flushTimeout)
+	actionBlock := createInnerActionBlock(batches, done, parallelism, action)
+
+	return BatchActionBlock[T]{
+		Input:        in,
+		Done:         done,
+		BatchSize:    batchSize,
+		FlushTimeout: flushTimeout,
+		Parallelism:  parallelism,
+		Action:       action,
+		batches:      batches,
+		batchBlock:   &batchBlock,
+		actionBlock:  &actionBlock,
+	}
+}
+
+func createInnerBatchBlock[T any](batches chan []T, in chan T, batchSize int, flushTimeout time.Duration) BatchBlock[T] {
+	sendBatch := func(batch []T) {
 		batches <- batch
 	}
+	return CreateBatchBlock(in, batchSize, flushTimeout, sendBatch)
+}
 
-	batchBlock := CreateBatchBlock(in, batchSize, flushTimeout, sendToActionBlock)
-	go batchBlock.Run()
-
+func createInnerActionBlock[T any](batches chan []T, done func(item T), parallelism int, action func(batch []T)) ActionBlock[[]T] {
 	batchDone := func(batch []T) {
 		for _, item := range batch {
 			done(item)
 		}
 	}
+	return CreateActionBlock(batches, batchDone, parallelism, action)
+}
 
-	actionBlock := CreateActionBlock(batches, batchDone, parallelism, action)
-	go actionBlock.Run()
+func RunBatchActionBlock[T any](
+	in chan T,
+	done func(item T),
+	batchSize int,
+	flushTimeout time.Duration,
+	parallelism int,
+	action func(batch []T),
+) {
+	b := CreateBatchActionBlock(in, done, batchSize, flushTimeout, parallelism, action)
+
+	go b.batchBlock.Run()
+	go b.actionBlock.Run()
 }
