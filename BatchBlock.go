@@ -11,6 +11,7 @@ type BatchBlock[T any] struct {
 	FlushTimeout time.Duration
 	timer        *time.Ticker
 	buffer       []T
+	batchFlushed bool
 }
 
 func (block *BatchBlock[T]) Run() {
@@ -28,8 +29,13 @@ func (block *BatchBlock[T]) Run() {
 				if len(block.buffer) == block.BatchSize {
 					block.flushBuffer()
 					block.restartTimer()
+					block.batchFlushed = true
 				}
 			case <-block.timer.C:
+				if block.batchFlushed {
+					block.batchFlushed = false
+					continue
+				}
 				if len(block.buffer) > 0 {
 					block.flushBuffer()
 				}
@@ -39,13 +45,14 @@ func (block *BatchBlock[T]) Run() {
 }
 
 func (block *BatchBlock[T]) flushBuffer() {
-	block.Done(block.buffer)
+	batch := make([]T, len(block.buffer))
+	copy(batch, block.buffer)
+
+	block.Done(batch)
 	block.buffer = block.buffer[:0]
 }
 
 func (block *BatchBlock[T]) restartTimer() {
-	block.timer.Stop()
-	<-block.timer.C
 	block.timer.Reset(block.FlushTimeout)
 }
 

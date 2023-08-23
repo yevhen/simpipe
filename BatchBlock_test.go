@@ -23,6 +23,25 @@ func TestFlushesBySize(t *testing.T) {
 	assert.Equal(t, "baz", batch[1])
 }
 
+func TestFlushesBySizeSequentially(t *testing.T) {
+	batches := make(chan []string)
+	done := func(batch []string) {
+		batches <- batch
+	}
+
+	in := make(chan string, 2)
+	go RunBatchBlock(in, 1, time.Hour, done)
+
+	in <- "bar"
+	in <- "baz"
+
+	batch0 := <-batches
+	batch1 := <-batches
+
+	assert.Equal(t, []string{"bar"}, batch0)
+	assert.Equal(t, []string{"baz"}, batch1)
+}
+
 func TestFlushesByTimer(t *testing.T) {
 	batches := make(chan []string)
 	done := func(batch []string) {
