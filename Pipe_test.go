@@ -6,10 +6,14 @@ import (
 	"time"
 )
 
+type PipeSender[T any] interface {
+	Send(item T)
+}
+
 type Pipe[T any] struct {
 	Receiver func(item T)
 	Filter   func(item T) bool
-	Next     func(item T) *Pipe[T]
+	Next     func(item T) PipeSender[T]
 }
 
 func (pipe *Pipe[T]) Send(item T) {
@@ -63,9 +67,35 @@ func TestDoesNotPassFilteredItemToReceiver(t *testing.T) {
 	assert.Empty(t, sent)
 }
 
+type PipeSenderMock[T any] struct {
+	ReceivedItem T
+}
+
+func (p *PipeSenderMock[T]) Send(item T) {
+	p.ReceivedItem = item
+}
+
+func TestPassesFilteredItemToNextPipe(t *testing.T) {
+	nextPipe := new(PipeSenderMock[string])
+
+	next := func(item string) PipeSender[string] {
+		var p PipeSender[string] = nextPipe
+		return p
+	}
+
+	filter := func(item string) bool {
+		return false
+	}
+
+	pipe := createFilteredPipeWithNext(filter, next)
+	pipe.Send("foo")
+
+	assert.Equal(t, "foo", nextPipe.ReceivedItem)
+}
+
 func TestPassesFilteredItemToNextAndNextReturnsNil(t *testing.T) {
 	var received string
-	next := func(item string) *Pipe[string] {
+	next := func(item string) PipeSender[string] {
 		received = item
 		return nil
 	}
@@ -115,20 +145,20 @@ func createPipe[T any](action func(item T)) *Pipe[T] {
 	filter := func(item T) bool {
 		return true
 	}
-	next := func(item T) *Pipe[T] {
+	next := func(item T) PipeSender[T] {
 		return nil
 	}
 	return createCompletePipe(action, filter, next)
 }
 
 func createFilteredPipe[T any](receiver func(item T), filter func(item T) bool) *Pipe[T] {
-	next := func(item T) *Pipe[T] {
+	next := func(item T) PipeSender[T] {
 		return nil
 	}
 	return createCompletePipe(receiver, filter, next)
 }
 
-func createFilteredPipeWithNext[T any](filter func(item T) bool, next func(item T) *Pipe[T]) *Pipe[T] {
+func createFilteredPipeWithNext[T any](filter func(item T) bool, next func(item T) PipeSender[T]) *Pipe[T] {
 	action := func(item T) {
 	}
 	p := createPipe(action)
@@ -137,7 +167,7 @@ func createFilteredPipeWithNext[T any](filter func(item T) bool, next func(item 
 	return p
 }
 
-func createCompletePipe[T any](receiver func(item T), filter func(item T) bool, next func(item T) *Pipe[T]) *Pipe[T] {
+func createCompletePipe[T any](receiver func(item T), filter func(item T) bool, next func(item T) PipeSender[T]) *Pipe[T] {
 	return &Pipe[T]{
 		Filter:   filter,
 		Receiver: receiver,
