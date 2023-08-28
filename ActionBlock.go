@@ -20,14 +20,13 @@ func (block *ActionBlock[T]) process() {
 	}
 }
 
-func CreateActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) ActionBlock[T] {
-	block := ActionBlock[T]{
+func CreateActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) *ActionBlock[T] {
+	return &ActionBlock[T]{
 		Input:       in,
 		Done:        done,
 		Parallelism: parallelism,
 		Action:      action,
 	}
-	return block
 }
 
 func RunActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) {

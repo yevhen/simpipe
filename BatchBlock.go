@@ -64,8 +64,8 @@ func (block *BatchBlock[T]) restartTimer() {
 	block.timer.Reset(block.FlushTimeout)
 }
 
-func CreateBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) BatchBlock[T] {
-	return BatchBlock[T]{
+func CreateBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) *BatchBlock[T] {
+	return &BatchBlock[T]{
 		Input:        in,
 		Done:         done,
 		BatchSize:    batchSize,
