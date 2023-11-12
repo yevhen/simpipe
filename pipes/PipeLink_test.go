@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+type PipeMock[T any] struct {
+	ReceivedItem T
+}
+
+func (p *PipeMock[T]) Send(item T) {
+	p.ReceivedItem = item
+}
+
 func TestSendsItem(t *testing.T) {
 	var sent string
 	action := func(item string) {
@@ -36,20 +44,11 @@ func TestDoesNotPassFilteredItemToReceiver(t *testing.T) {
 	assert.Empty(t, sent)
 }
 
-type PipeMock[T any] struct {
-	ReceivedItem T
-}
-
-func (p *PipeMock[T]) Send(item T) {
-	p.ReceivedItem = item
-}
-
 func TestPassesFilteredItemToNextPipe(t *testing.T) {
 	nextPipe := new(PipeMock[string])
 
 	next := func(item string) Pipe[string] {
-		var p Pipe[string] = nextPipe
-		return p
+		return nextPipe
 	}
 
 	filter := func(item string) bool {
