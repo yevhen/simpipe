@@ -1,4 +1,4 @@
-package simpipe
+package pipes
 
 import (
 	"github.com/stretchr/testify/assert"

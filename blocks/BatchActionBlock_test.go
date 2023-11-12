@@ -1,4 +1,4 @@
-package simpipe
+package blocks
 
 import (
 	"fmt"

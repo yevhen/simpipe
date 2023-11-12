@@ -1,6 +1,7 @@
-package simpipe
+package pipes
 
 import (
+	"simpipe/blocks"
 	"time"
 )
 
@@ -37,7 +38,7 @@ func (p *PipeLink[T]) sendNext(item T) {
 type ActionPipe[T any] struct {
 	in    chan T
 	link  *PipeLink[T]
-	block *ActionBlock[T]
+	block *blocks.ActionBlock[T]
 }
 
 func (p *ActionPipe[T]) Run() {
@@ -69,7 +70,7 @@ func CreateActionPipe[T any](
 		next:   next,
 	}
 
-	block := CreateActionBlock(input, pipe.sendNext, parallelism, action)
+	block := blocks.CreateActionBlock(input, pipe.sendNext, parallelism, action)
 
 	return &ActionPipe[T]{
 		in:    input,
@@ -81,7 +82,7 @@ func CreateActionPipe[T any](
 type BatchActionPipe[T any] struct {
 	in    chan T
 	link  *PipeLink[T]
-	block *BatchActionBlock[T]
+	block *blocks.BatchActionBlock[T]
 }
 
 func (p *BatchActionPipe[T]) Run() {
@@ -114,7 +115,7 @@ func CreateBatchActionPipe[T any](
 		next:   next,
 	}
 
-	block := CreateBatchActionBlock(input, pipe.sendNext, batchSize, time.Hour, parallelism, action)
+	block := blocks.CreateBatchActionBlock(input, pipe.sendNext, batchSize, time.Hour, parallelism, action)
 
 	return &BatchActionPipe[T]{
 		in:    input,

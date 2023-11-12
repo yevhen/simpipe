@@ -1,4 +1,4 @@
-package simpipe
+package blocks
 
 type ActionBlock[T any] struct {
 	Input       <-chan T
