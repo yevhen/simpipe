@@ -134,6 +134,40 @@ func TestBatchPipeBlockIntegration(t *testing.T) {
 	assert.ElementsMatch(t, []string{"foo", "foo", "bar"}, nextReceived)
 }
 
+func TestLinkingPipes(t *testing.T) {
+	sent := make(chan string)
+	action := func(item string) {
+		sent <- item
+	}
+
+	var first *ActionPipe[string]
+	var second *ActionPipe[string]
+
+	filter := func(item string) bool {
+		return true
+	}
+
+	next := func(item string) Pipe[string] {
+		return second
+	}
+
+	end := func(item string) Pipe[string] {
+		return nil
+	}
+
+	first = CreateActionPipe(0, 1, action, filter, next)
+	first.Run()
+
+	second = CreateActionPipe(0, 1, action, filter, end)
+	second.Run()
+
+	first.Send("foo")
+	first.Close()
+
+	assert.Equal(t, "foo", <-sent)
+	assert.Equal(t, "foo", <-sent)
+}
+
 func createPipeLinkWithReceiver[T any](receiver func(item T)) *PipeLink[T] {
 	filter := func(item T) bool {
 		return true
