@@ -20,6 +20,38 @@ func (p *ActionPipe[T]) Close() {
 	close(p.in)
 }
 
+func (p *ActionPipe[T]) LinkNext(pipe *ActionPipe[T]) {
+	p.link.next = func(item T) Pipe[T] {
+		return pipe
+	}
+}
+
+func (p *ActionPipe[T]) Link(pipe *ActionPipe[T], when func(item T) bool) {
+	prev := p.link.next
+	p.link.next = func(item T) Pipe[T] {
+		if when(item) {
+			return pipe
+		}
+		return prev(item)
+	}
+}
+
+func NewActionPipe[T any](
+	capacity int,
+	parallelism int,
+	action func(item T),
+) *ActionPipe[T] {
+	filter := func(item T) bool {
+		return true
+	}
+
+	next := func(item T) Pipe[T] {
+		return nil
+	}
+
+	return CreateActionPipe(capacity, parallelism, action, filter, next)
+}
+
 func CreateActionPipe[T any](
 	capacity int,
 	parallelism int,

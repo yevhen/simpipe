@@ -79,37 +79,36 @@ func TestPassesFilteredItemToNextAndNextReturnsNil(t *testing.T) {
 }
 
 func TestLinkingPipes(t *testing.T) {
-	sent := make(chan string)
+	processed := make(chan string, 2)
 	action := func(item string) {
-		sent <- item
+		processed <- item
 	}
 
-	var first *ActionPipe[string]
-	var second *ActionPipe[string]
+	first := NewActionPipe(0, 1, action)
+	second := NewActionPipe(0, 1, action)
+	third := NewActionPipe(0, 1, action)
 
-	filter := func(item string) bool {
-		return true
-	}
+	first.LinkNext(second)
+	second.LinkNext(third)
 
-	next := func(item string) Pipe[string] {
-		return second
-	}
+	first.Link(third, func(item string) bool {
+		return item == "bar"
+	})
 
-	end := func(item string) Pipe[string] {
-		return nil
-	}
-
-	first = CreateActionPipe(0, 1, action, filter, next)
 	first.Run()
-
-	second = CreateActionPipe(0, 1, action, filter, end)
 	second.Run()
+	third.Run()
 
 	first.Send("foo")
+	first.Send("bar")
 	first.Close()
 
-	assert.Equal(t, "foo", <-sent)
-	assert.Equal(t, "foo", <-sent)
+	assert.Equal(t, "foo", <-processed)
+	assert.Equal(t, "foo", <-processed)
+	assert.Equal(t, "foo", <-processed)
+	assert.Equal(t, "bar", <-processed)
+	assert.Equal(t, "bar", <-processed)
+	assert.Equal(t, 0, len(processed))
 }
 
 func createPipeLinkWithReceiver[T any](receiver func(item T)) *PipeLink[T] {
