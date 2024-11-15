@@ -56,8 +56,8 @@ func (block *BatchBlock[T]) flushBuffer() {
 	batch := make([]T, len(block.buffer))
 	copy(batch, block.buffer)
 
-	block.Done(batch)
 	block.buffer = block.buffer[:0]
+	block.Done(batch)
 }
 
 func (block *BatchBlock[T]) restartTimer() {
