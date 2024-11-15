@@ -8,29 +8,29 @@ type ActionPipe[T any] struct {
 	block *blocks.ActionBlock[T]
 }
 
-func (p *ActionPipe[T]) Run() {
-	p.block.Run()
+func (pipe *ActionPipe[T]) Run() {
+	pipe.block.Run()
 }
 
-func (p *ActionPipe[T]) Send(item T) {
-	p.link.Send(item)
+func (pipe *ActionPipe[T]) Send(item T) {
+	pipe.link.Send(item)
 }
 
-func (p *ActionPipe[T]) Close() {
-	close(p.in)
+func (pipe *ActionPipe[T]) Close() {
+	close(pipe.in)
 }
 
-func (p *ActionPipe[T]) LinkNext(pipe *ActionPipe[T]) {
-	p.link.next = func(item T) Pipe[T] {
-		return pipe
+func (pipe *ActionPipe[T]) LinkNext(next *ActionPipe[T]) {
+	pipe.link.next = func(item T) Pipe[T] {
+		return next
 	}
 }
 
-func (p *ActionPipe[T]) Link(pipe *ActionPipe[T], when func(item T) bool) {
-	prev := p.link.next
-	p.link.next = func(item T) Pipe[T] {
+func (pipe *ActionPipe[T]) Link(next *ActionPipe[T], when func(item T) bool) {
+	prev := pipe.link.next
+	pipe.link.next = func(item T) Pipe[T] {
 		if when(item) {
-			return pipe
+			return next
 		}
 		return prev(item)
 	}

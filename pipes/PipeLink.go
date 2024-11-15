@@ -6,21 +6,21 @@ type PipeLink[T any] struct {
 	next     func(item T) Pipe[T]
 }
 
-func (p *PipeLink[T]) Send(item T) {
-	if p.filter(item) {
-		p.receiver(item)
+func (link *PipeLink[T]) Send(item T) {
+	if link.filter(item) {
+		link.receiver(item)
 		return
 	}
 
-	p.SendNext(item)
+	link.SendNext(item)
 }
 
-func (p *PipeLink[T]) SendNext(item T) {
-	if p.next == nil {
+func (link *PipeLink[T]) SendNext(item T) {
+	if link.next == nil {
 		return
 	}
 
-	next := p.next(item)
+	next := link.next(item)
 	if next != nil {
 		next.Send(item)
 	}

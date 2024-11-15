@@ -16,9 +16,9 @@ type BatchActionBlock[T any] struct {
 	actionBlock  *ActionBlock[[]T]
 }
 
-func (b *BatchActionBlock[T]) Run() {
-	b.batchBlock.Run()
-	b.actionBlock.Run()
+func (block *BatchActionBlock[T]) Run() {
+	block.batchBlock.Run()
+	block.actionBlock.Run()
 }
 
 func CreateBatchActionBlock[T any](

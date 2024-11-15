@@ -11,16 +11,16 @@ type BatchActionPipe[T any] struct {
 	block *blocks.BatchActionBlock[T]
 }
 
-func (p *BatchActionPipe[T]) Run() {
-	p.block.Run()
+func (pipe *BatchActionPipe[T]) Run() {
+	pipe.block.Run()
 }
 
-func (p *BatchActionPipe[T]) Send(item T) {
-	p.link.Send(item)
+func (pipe *BatchActionPipe[T]) Send(item T) {
+	pipe.link.Send(item)
 }
 
-func (p *BatchActionPipe[T]) Close() {
-	close(p.in)
+func (pipe *BatchActionPipe[T]) Close() {
+	close(pipe.in)
 }
 
 func CreateBatchActionPipe[T any](
