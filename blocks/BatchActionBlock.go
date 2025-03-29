@@ -52,7 +52,14 @@ func createInnerBatchBlock[T any](batches chan []T, in chan T, batchSize int, fl
 	sendBatch := func(batch []T) {
 		batches <- batch
 	}
-	return CreateBatchBlock(in, batchSize, flushTimeout, sendBatch)
+	return &BatchBlock[T]{
+		Input:        in,
+		Done:         sendBatch,
+		BatchSize:    batchSize,
+		FlushTimeout: flushTimeout,
+		buffer:       make([]T, 0, batchSize),
+		timer:        time.NewTicker(flushTimeout),
+	}
 }
 
 func createInnerActionBlock[T any](batches chan []T, done func(item T), parallelism int, action func(batch []T)) *ActionBlock[[]T] {

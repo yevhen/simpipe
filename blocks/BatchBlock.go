@@ -63,19 +63,3 @@ func (block *BatchBlock[T]) flushBuffer() {
 func (block *BatchBlock[T]) restartTimer() {
 	block.timer.Reset(block.FlushTimeout)
 }
-
-func CreateBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) *BatchBlock[T] {
-	return &BatchBlock[T]{
-		Input:        in,
-		Done:         done,
-		BatchSize:    batchSize,
-		FlushTimeout: flushTimeout,
-		buffer:       make([]T, 0, batchSize),
-		timer:        time.NewTicker(flushTimeout),
-	}
-}
-
-func RunBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) {
-	block := CreateBatchBlock(in, batchSize, flushTimeout, done)
-	block.Run()
-}
