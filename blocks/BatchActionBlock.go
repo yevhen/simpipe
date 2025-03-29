@@ -5,7 +5,7 @@ import (
 )
 
 type BatchActionBlock[T any] struct {
-	Input        <-chan T
+	Input        chan T
 	Done         func(item T)
 	BatchSize    int
 	FlushTimeout time.Duration
@@ -17,6 +17,14 @@ type BatchActionBlock[T any] struct {
 }
 
 func (block *BatchActionBlock[T]) Run() {
+	if block.batches != nil {
+		panic("BatchActionBlock is already running")
+	}
+
+	block.batches = make(chan []T)
+	block.batchBlock = createInnerBatchBlock(block.batches, block.Input, block.BatchSize, block.FlushTimeout)
+	block.actionBlock = createInnerActionBlock(block.batches, block.Done, block.Parallelism, block.Action)
+
 	block.batchBlock.Run()
 	block.actionBlock.Run()
 }
@@ -30,11 +38,6 @@ func CreateBatchActionBlock[T any](
 	action func(batch []T),
 ) *BatchActionBlock[T] {
 
-	var batches = make(chan []T)
-
-	batchBlock := createInnerBatchBlock(batches, in, batchSize, flushTimeout)
-	actionBlock := createInnerActionBlock(batches, done, parallelism, action)
-
 	return &BatchActionBlock[T]{
 		Input:        in,
 		Done:         done,
@@ -42,9 +45,6 @@ func CreateBatchActionBlock[T any](
 		FlushTimeout: flushTimeout,
 		Parallelism:  parallelism,
 		Action:       action,
-		batches:      batches,
-		batchBlock:   batchBlock,
-		actionBlock:  actionBlock,
 	}
 }
 
