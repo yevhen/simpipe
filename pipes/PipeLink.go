@@ -9,7 +9,6 @@ type PipeLink[T any] struct {
 func (link *PipeLink[T]) Send(item T) {
 	if link.filter(item) {
 		link.receiver(item)
-		return
 	}
 
 	link.SendNext(item)

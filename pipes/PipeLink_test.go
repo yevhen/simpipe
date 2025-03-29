@@ -6,11 +6,11 @@ import (
 )
 
 type PipeMock[T any] struct {
-	ReceivedItem T
+	ReceivedItems []T
 }
 
 func (p *PipeMock[T]) Send(item T) {
-	p.ReceivedItem = item
+	p.ReceivedItems = append(p.ReceivedItems, item)
 }
 
 func TestSendsItem(t *testing.T) {
@@ -52,13 +52,14 @@ func TestPassesFilteredItemToNextPipe(t *testing.T) {
 	}
 
 	filter := func(item string) bool {
-		return false
+		return item == "foo"
 	}
 
 	pipe := createPipeLinkWithNext(filter, next)
 	pipe.Send("foo")
+	pipe.Send("bar")
 
-	assert.Equal(t, "foo", nextPipe.ReceivedItem)
+	assert.ElementsMatch(t, []string{"foo", "bar"}, nextPipe.ReceivedItems)
 }
 
 func TestPassesFilteredItemToNextAndNextReturnsNil(t *testing.T) {
