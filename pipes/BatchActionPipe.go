@@ -41,7 +41,14 @@ func CreateBatchActionPipe[T any](
 		next:   next,
 	}
 
-	block := blocks.CreateBatchActionBlock(input, pipe.SendNext, batchSize, time.Hour, parallelism, action)
+	block := &blocks.BatchActionBlock[T]{
+		Input:        input,
+		Done:         pipe.SendNext,
+		BatchSize:    batchSize,
+		FlushTimeout: time.Hour,
+		Parallelism:  parallelism,
+		Action:       action,
+	}
 
 	return &BatchActionPipe[T]{
 		in:    input,

@@ -29,25 +29,6 @@ func (block *BatchActionBlock[T]) Run() {
 	block.actionBlock.Run()
 }
 
-func CreateBatchActionBlock[T any](
-	in chan T,
-	done func(item T),
-	batchSize int,
-	flushTimeout time.Duration,
-	parallelism int,
-	action func(batch []T),
-) *BatchActionBlock[T] {
-
-	return &BatchActionBlock[T]{
-		Input:        in,
-		Done:         done,
-		BatchSize:    batchSize,
-		FlushTimeout: flushTimeout,
-		Parallelism:  parallelism,
-		Action:       action,
-	}
-}
-
 func createInnerBatchBlock[T any](batches chan []T, in chan T, batchSize int, flushTimeout time.Duration) *BatchBlock[T] {
 	sendBatch := func(batch []T) {
 		batches <- batch
@@ -75,16 +56,4 @@ func createInnerActionBlock[T any](batches chan []T, done func(item T), parallel
 		Parallelism: parallelism,
 		Action:      action,
 	}
-}
-
-func RunBatchActionBlock[T any](
-	in chan T,
-	done func(item T),
-	batchSize int,
-	flushTimeout time.Duration,
-	parallelism int,
-	action func(batch []T),
-) {
-	block := CreateBatchActionBlock(in, done, batchSize, flushTimeout, parallelism, action)
-	block.Run()
 }
