@@ -61,7 +61,13 @@ func createInnerActionBlock[T any](batches chan []T, done func(item T), parallel
 			done(item)
 		}
 	}
-	return CreateActionBlock(batches, batchDone, parallelism, action)
+
+	return &ActionBlock[[]T]{
+		Input:       batches,
+		Done:        batchDone,
+		Parallelism: parallelism,
+		Action:      action,
+	}
 }
 
 func RunBatchActionBlock[T any](

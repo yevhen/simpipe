@@ -17,7 +17,7 @@ func TestExecutesGivenLambdaOnItemReceivedFromChannel(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go RunActionBlock(in, done, 1, action)
+	go runActionBlock(in, done, 1, action)
 
 	in <- "bar"
 	in <- "baz"
@@ -37,7 +37,7 @@ func TestPassesItemAfterExecutionToDone(t *testing.T) {
 	}
 
 	in := make(chan *struct{ text string })
-	go RunActionBlock(in, done, 1, action)
+	go runActionBlock(in, done, 1, action)
 
 	var i1 struct{ text string }
 	i1.text = "bar"
@@ -64,7 +64,7 @@ func TestDegreeOfParallelism(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go RunActionBlock(in, done, 2, action)
+	go runActionBlock(in, done, 2, action)
 
 	now := time.Now()
 
@@ -76,4 +76,14 @@ func TestDegreeOfParallelism(t *testing.T) {
 	elapsed := time.Now().Sub(now)
 
 	assert.InDelta(t, delay.Seconds(), elapsed.Seconds(), delay.Seconds()/2)
+}
+
+func runActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) {
+	block := &ActionBlock[T]{
+		Input:       in,
+		Done:        done,
+		Parallelism: parallelism,
+		Action:      action,
+	}
+	block.Run()
 }

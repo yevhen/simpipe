@@ -69,7 +69,12 @@ func CreateActionPipe[T any](
 		next:   next,
 	}
 
-	block := blocks.CreateActionBlock(input, pipe.SendNext, parallelism, action)
+	block := &blocks.ActionBlock[T]{
+		Input:       input,
+		Done:        pipe.SendNext,
+		Parallelism: parallelism,
+		Action:      action,
+	}
 
 	return &ActionPipe[T]{
 		in:    input,
