@@ -13,14 +13,6 @@ Simpipe is a Go library that implements the pipeline pattern for parallel data p
 - Filtering
 - Strong typing via Go generics
 
-## Design Principles
-
-1. **Simplicity**: Each component has a single responsibility and is easy to understand
-2. **Composability**: Components can be combined to create complex processing pipelines
-3. **Type Safety**: Using Go generics for compile-time type checking
-4. **Concurrency**: Built-in support for parallel processing with controllable parallelism
-5. **Efficiency**: Batching support for operations that benefit from processing multiple items at once
-   
 ## Installation
 
 ```bash
@@ -38,8 +30,18 @@ Executes an action on each item received from an input channel with configurable
 in := make(chan string)
 done := func(item string) { fmt.Println("Done processing:", item) }
 action := func(item string) { fmt.Println("Processing:", item) }
+parallelism := 2
 
-RunActionBlock(in, done, 2, action)
+block := CreateActionBlock(
+    in,                // Input channel
+    done,              // Done callback
+    parallelism,       // Parallelism level
+    action,            // Action to perform
+)
+block.Run()
+
+// Alternatively, using the convenience method
+RunActionBlock(in, done, parallelism, action)
 
 // Send items to the block
 in <- "item1"
@@ -51,13 +53,24 @@ in <- "item2"
 Accumulates items from an input channel into batches based on either batch size or flush timeout.
 
 ```go
-// Create and run a BatchBlock that collects items into batches of 10 
+// Create and run a BatchBlock that collects items into batches of 10
 // or flushes every 5 seconds, whichever comes first
 in := make(chan string)
+done := func(batch []string) { fmt.Println("Batch size:", len(batch)) }
 batchSize := 10
 flushTimeout := 5 * time.Second
-done := func(batch []string) { fmt.Println("Batch size:", len(batch)) }
 
+block := CreateBatchBlock(
+    simpipe.BatchBlockConfig[string]{
+        Input:        in,
+        BatchSize:    batchSize,
+        FlushTimeout: flushTimeout,
+        Done:         done,
+    },
+)
+block.Run()
+
+// Alternatively, using the convenience method
 RunBatchBlock(in, batchSize, flushTimeout, done)
 
 // Send items to the block
@@ -73,12 +86,26 @@ Combines BatchBlock and ActionBlock to collect items into batches and then proce
 ```go
 // Create and run a BatchActionBlock
 in := make(chan string)
+action := func(batch []string) { fmt.Println("Processing batch of size:", len(batch)) }
 done := func(item string) { fmt.Println("Done processing:", item) }
 batchSize := 10
 flushTimeout := 5 * time.Second
 parallelism := 2
-action := func(batch []string) { fmt.Println("Processing batch of size:", len(batch)) }
 
+// Using named config struct for clarity
+block := CreateBatchActionBlock(
+    simpipe.BatchActionBlockConfig[string]{
+        Input:        in,
+        Done:         done,
+        BatchSize:    batchSize,
+        FlushTimeout: flushTimeout,
+        Parallelism:  parallelism,
+        Action:       action,
+    },
+)
+block.Run()
+
+// Alternatively, using the convenience method
 RunBatchActionBlock(in, done, batchSize, flushTimeout, parallelism, action)
 
 // Send items to the block
@@ -110,40 +137,12 @@ type LogEntry struct {
 }
 
 func main() {
-	// Create a pipeline for processing log entries
-	
-	// First stage: filter and process error logs
-	errorFilter := func(entry LogEntry) bool {
-		return entry.Level == "ERROR"
-	}
-	
-	// Second stage: process warning logs
 	warningPipe := createWarningPipe()
+	warningPipe.Run()
 	
-	nextStage := func(entry LogEntry) simpipe.Pipe[LogEntry] {
-		if entry.Level == "WARNING" {
-			return warningPipe
-		}
-		return nil
-	}
-	
-	// Define action for processing error logs
-	processError := func(entry LogEntry) {
-		fmt.Printf("Processing ERROR: %s\n", entry.Message)
-		time.Sleep(100 * time.Millisecond) // Simulate processing time
-	}
-	
-	// Create and run the error log pipeline
-	errorPipe := simpipe.CreateActionPipe[LogEntry](
-		10,           // channel capacity
-		3,            // parallelism
-		processError, // action function
-		errorFilter,  // filter function
-		nextStage,    // next stage function
-	)
+	errorPipe := createErrorPipe(warningPipe)
 	errorPipe.Run()
 	
-	// Feed log entries into the pipeline
 	logs := []LogEntry{
 		{Level: "INFO", Message: "Application started"},
 		{Level: "WARNING", Message: "Disk space low"},
@@ -163,6 +162,34 @@ func main() {
 	warningPipe.Close()
 }
 
+func createErrorPipe(warningPipe *simpipe.ActionPipe[LogEntry]) *simpipe.ActionPipe[LogEntry] {
+	errorFilter := func(entry LogEntry) bool {
+		return entry.Level == "ERROR"
+	}
+	
+	nextStage := func(entry LogEntry) simpipe.Pipe[LogEntry] {
+		if entry.Level == "WARNING" {
+			return warningPipe
+		}
+		return nil
+	}
+	
+	processError := func(entry LogEntry) {
+		fmt.Printf("Processing ERROR: %s\n", entry.Message)
+		time.Sleep(100 * time.Millisecond) // Simulate processing time
+	}
+	
+	return simpipe.CreateActionPipe(
+		simpipe.ActionPipeConfig[LogEntry]{
+			Capacity:    10,
+			Parallelism: 3,
+			Action:      processError,
+			Filter:      errorFilter,
+			Next:        nextStage,
+		},
+	)
+}
+
 func createWarningPipe() *simpipe.ActionPipe[LogEntry] {
 	processWarning := func(entry LogEntry) {
 		fmt.Printf("Processing WARNING: %s\n", entry.Message)
@@ -173,12 +200,14 @@ func createWarningPipe() *simpipe.ActionPipe[LogEntry] {
 		return true // Process all warnings that reach this pipe
 	}
 	
-	return simpipe.CreateActionPipe[LogEntry](
-		5,              // channel capacity
-		2,              // parallelism
-		processWarning, // action function
-		warningFilter,  // filter function
-		nil,            // no next stage
+	return simpipe.CreateActionPipe(
+		simpipe.ActionPipeConfig[LogEntry]{
+			Capacity:    5,
+			Parallelism: 2,
+			Action:      processWarning,
+			Filter:      warningFilter,
+			Next:        nil, // No next stage
+		},
 	)
 }
 ```
@@ -202,7 +231,24 @@ type DataPoint struct {
 }
 
 func main() {
-	// Create a batch processing pipeline
+	batchPipe := createDataPointBatchPipe()
+	batchPipe.Run()
+	
+	// Generate and send data points
+	for i := 0; i < 20; i++ {
+		point := DataPoint{
+			ID:    i,
+			Value: float64(i) * 1.5,
+		}
+		batchPipe.Send(point)
+	}
+	
+	// Wait to allow processing to complete
+	time.Sleep(2 * time.Second)
+	batchPipe.Close()
+}
+
+func createDataPointBatchPipe() *simpipe.BatchActionPipe[DataPoint] {
 	processBatch := func(batch []DataPoint) {
 		fmt.Printf("Processing batch of %d items\n", len(batch))
 		// Simulate batch processing
@@ -218,29 +264,16 @@ func main() {
 		return true
 	}
 	
-	// Create and run the batch processing pipeline
-	batchPipe := simpipe.CreateBatchActionPipe[DataPoint](
-		20,          // channel capacity
-		2,           // parallelism
-		5,           // batch size
-		processBatch, // batch action function
-		filter,      // filter function
-		nil,         // no next stage
+	return simpipe.CreateBatchActionPipe(
+		simpipe.BatchActionPipeConfig[DataPoint]{
+			Capacity:    20,
+			Parallelism: 2,
+			BatchSize:   5,
+			Action:      processBatch,
+			Filter:      filter,
+			Next:        nil, // No next stage
+		},
 	)
-	batchPipe.Run()
-	
-	// Generate and send data points
-	for i := 0; i < 20; i++ {
-		point := DataPoint{
-			ID:    i,
-			Value: float64(i) * 1.5,
-		}
-		batchPipe.Send(point)
-	}
-	
-	// Wait to allow processing to complete
-	time.Sleep(2 * time.Second)
-	batchPipe.Close()
 }
 ```
 
@@ -265,78 +298,15 @@ type Document struct {
 }
 
 func main() {
-	// Create a document processing pipeline with multiple stages
-	
-	// Stage 3: Archive processor (final stage for all documents)
-	archiveFilter := func(doc Document) bool {
-		return true // Archive all documents
-	}
-	
-	archiveAction := func(docs []Document) {
-		fmt.Printf("Archiving batch of %d documents\n", len(docs))
-		time.Sleep(100 * time.Millisecond)
-	}
-	
-	archivePipe := simpipe.CreateBatchActionPipe[Document](
-		30,            // capacity
-		1,             // parallelism
-		10,            // batch size
-		archiveAction, // batch action
-		archiveFilter, // filter
-		nil,           // no next stage
-	)
+	archivePipe := createArchivePipe()
 	archivePipe.Run()
 	
-	// Stage 2: Analytics processor
-	analyticsFilter := func(doc Document) bool {
-		return true // Process all documents for analytics
-	}
-	
-	analyticsAction := func(doc Document) {
-		fmt.Printf("Analyzing document: %s\n", doc.ID)
-		time.Sleep(50 * time.Millisecond)
-	}
-	
-	analyticsNext := func(doc Document) simpipe.Pipe[Document] {
-		return archivePipe // Send to archive after analytics
-	}
-	
-	analyticsPipe := simpipe.CreateActionPipe[Document](
-		20,              // capacity
-		3,               // parallelism
-		analyticsAction, // action
-		analyticsFilter, // filter
-		analyticsNext,   // next stage
-	)
+	analyticsPipe := createAnalyticsPipe(archivePipe)
 	analyticsPipe.Run()
 	
-	// Stage 1: Content processor (entry point)
-	contentFilter := func(doc Document) bool {
-		// Only process documents with non-empty content
-		return len(doc.Content) > 0
-	}
-	
-	contentAction := func(doc Document) {
-		fmt.Printf("Processing content for document: %s\n", doc.ID)
-		// Simulate content processing
-		doc.Content = strings.ToUpper(doc.Content)
-		time.Sleep(100 * time.Millisecond)
-	}
-	
-	contentNext := func(doc Document) simpipe.Pipe[Document] {
-		return analyticsPipe // Send to analytics after content processing
-	}
-	
-	contentPipe := simpipe.CreateActionPipe[Document](
-		10,             // capacity
-		2,              // parallelism
-		contentAction,  // action
-		contentFilter,  // filter
-		contentNext,    // next stage
-	)
+	contentPipe := createContentPipe(analyticsPipe)
 	contentPipe.Run()
 	
-	// Feed documents into the pipeline
 	docs := []Document{
 		{ID: "doc1", Content: "Hello world", Tags: []string{"greeting"}},
 		{ID: "doc2", Content: "Important notice", Tags: []string{"notice", "important"}},
@@ -356,7 +326,93 @@ func main() {
 	analyticsPipe.Close()
 	archivePipe.Close()
 }
+
+// Stage 1: Content processor (entry point)
+func createContentPipe(nextPipe simpipe.Pipe[Document]) *simpipe.ActionPipe[Document] {
+	contentFilter := func(doc Document) bool {
+		// Only process documents with non-empty content
+		return len(doc.Content) > 0
+	}
+	
+	contentAction := func(doc Document) {
+		fmt.Printf("Processing content for document: %s\n", doc.ID)
+		// Simulate content processing
+		doc.Content = strings.ToUpper(doc.Content)
+		time.Sleep(100 * time.Millisecond)
+	}
+	
+	contentNext := func(doc Document) simpipe.Pipe[Document] {
+		return nextPipe // Send to analytics after content processing
+	}
+	
+	return simpipe.CreateActionPipe(
+		simpipe.ActionPipeConfig[Document]{
+			Capacity:    10,
+			Parallelism: 2,
+			Action:      contentAction,
+			Filter:      contentFilter,
+			Next:        contentNext,
+		},
+	)
+}
+
+// Stage 2: Analytics processor
+func createAnalyticsPipe(nextPipe simpipe.Pipe[Document]) *simpipe.ActionPipe[Document] {
+	analyticsFilter := func(doc Document) bool {
+		return true // Process all documents for analytics
+	}
+	
+	analyticsAction := func(doc Document) {
+		fmt.Printf("Analyzing document: %s\n", doc.ID)
+		time.Sleep(50 * time.Millisecond)
+	}
+	
+	analyticsNext := func(doc Document) simpipe.Pipe[Document] {
+		return nextPipe // Send to archive after analytics
+	}
+	
+	return simpipe.CreateActionPipe(
+		simpipe.ActionPipeConfig[Document]{
+			Capacity:    20,
+			Parallelism: 3,
+			Action:      analyticsAction,
+			Filter:      analyticsFilter,
+			Next:        analyticsNext,
+		},
+	)
+}
+
+// Stage 3: Archive processor (final stage for all documents)
+func createArchivePipe() *simpipe.BatchActionPipe[Document] {
+	archiveFilter := func(doc Document) bool {
+		return true // Archive all documents
+	}
+	
+	archiveAction := func(docs []Document) {
+		fmt.Printf("Archiving batch of %d documents\n", len(docs))
+		time.Sleep(100 * time.Millisecond)
+	}
+	
+	return simpipe.CreateBatchActionPipe(
+		simpipe.BatchActionPipeConfig[Document]{
+			Capacity:    30,
+			Parallelism: 1,
+			BatchSize:   10,
+			Action:      archiveAction,
+			Filter:      archiveFilter,
+			Next:        nil, // No next stage
+		},
+	)
+}
 ```
+
+## Design Principles
+
+1. **Simplicity**: Each component has a single responsibility and is easy to understand
+2. **Composability**: Components can be combined to create complex processing pipelines
+3. **Type Safety**: Using Go generics for compile-time type checking
+4. **Concurrency**: Built-in support for parallel processing with controllable parallelism
+5. **Efficiency**: Batching support for operations that benefit from processing multiple items at once
 
 ## License
 
