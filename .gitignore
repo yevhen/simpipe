@@ -19,3 +19,6 @@
 
 # Go workspace file
 go.work
+
+# macOS Finder directory metadata
+.DS_Store
