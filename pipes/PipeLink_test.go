@@ -13,53 +13,78 @@ func (p *PipeMock[T]) Send(item T) {
 	p.ReceivedItems = append(p.ReceivedItems, item)
 }
 
-func TestSendsItem(t *testing.T) {
-	var sent string
-	action := func(item string) {
-		sent = item
+func TestSendsItemThatPassesFilterToReceiver(t *testing.T) {
+	var received string
+	receiver := func(item string) {
+		received = item
 	}
 
-	const s = "foo"
-
-	p := createPipeLinkWithReceiver(action)
-	p.Send(s)
-
-	assert.Equal(t, sent, s)
-}
-
-func TestDoesNotPassFilteredItemToReceiver(t *testing.T) {
-	var sent string
-	action := func(item string) {
-		sent = item
-	}
-
-	const s = "foo"
 	filter := func(item string) bool {
-		return item != "foo"
+		return true
 	}
 
-	p := createPipeLinkWithFilter(action, filter)
+	const s = "foo"
+
+	p := createPipeLinkWithFilter(receiver, filter)
 	p.Send(s)
 
-	assert.Empty(t, sent)
+	assert.Equal(t, s, received)
 }
 
-func TestPassesFilteredItemToNextPipe(t *testing.T) {
+func TestDoesNotSendFilteredItemToReceiver(t *testing.T) {
+	var received string
+	receiver := func(item string) {
+		received = item
+	}
+
+	filter := func(item string) bool {
+		return false
+	}
+
+	const s = "foo"
+
+	p := createPipeLinkWithFilter(receiver, filter)
+	p.Send(s)
+
+	assert.Empty(t, received)
+}
+
+func TestDoesNotAutomaticallySendItemThatPassesFilterToNextPipe(t *testing.T) {
+	filter := func(item string) bool {
+		return true
+	}
+
 	nextPipe := new(PipeMock[string])
 
 	next := func(item string) Pipe[string] {
 		return nextPipe
 	}
 
+	const s = "foo"
+
+	p := createPipeLinkWithNext(filter, next)
+	p.Send(s)
+
+	assert.Empty(t, nextPipe.ReceivedItems)
+}
+
+func TestAutomaticallySendsFilteredItemToNextPipe(t *testing.T) {
 	filter := func(item string) bool {
-		return item == "foo"
+		return false
 	}
 
-	pipe := createPipeLinkWithNext(filter, next)
-	pipe.Send("foo")
-	pipe.Send("bar")
+	nextPipe := new(PipeMock[string])
 
-	assert.ElementsMatch(t, []string{"foo", "bar"}, nextPipe.ReceivedItems)
+	next := func(item string) Pipe[string] {
+		return nextPipe
+	}
+
+	const s = "foo"
+
+	p := createPipeLinkWithNext(filter, next)
+	p.Send(s)
+
+	assert.Equal(t, []string{s}, nextPipe.ReceivedItems)
 }
 
 func TestPassesFilteredItemToNextAndNextReturnsNil(t *testing.T) {
@@ -80,14 +105,11 @@ func TestPassesFilteredItemToNextAndNextReturnsNil(t *testing.T) {
 }
 
 func TestLinkingPipes(t *testing.T) {
-	processed := make(chan string, 2)
-	action := func(item string) {
-		processed <- item
-	}
+	processed := make(chan string)
 
-	first := NewActionPipe(0, 1, action)
-	second := NewActionPipe(0, 1, action)
-	third := NewActionPipe(0, 1, action)
+	first := NewActionPipe(0, 1, func(item string) { processed <- item + "1" })
+	second := NewActionPipe(0, 1, func(item string) { processed <- item + "2" })
+	third := NewActionPipe(0, 1, func(item string) { processed <- item + "3" })
 
 	first.LinkNext(second)
 	second.LinkNext(third)
@@ -104,11 +126,11 @@ func TestLinkingPipes(t *testing.T) {
 	first.Send("bar")
 	first.Close()
 
-	assert.Equal(t, "foo", <-processed)
-	assert.Equal(t, "foo", <-processed)
-	assert.Equal(t, "foo", <-processed)
-	assert.Equal(t, "bar", <-processed)
-	assert.Equal(t, "bar", <-processed)
+	assert.Equal(t, "foo1", <-processed)
+	assert.Equal(t, "foo2", <-processed)
+	assert.Equal(t, "foo3", <-processed)
+	assert.Equal(t, "bar1", <-processed)
+	assert.Equal(t, "bar3", <-processed)
 	assert.Equal(t, 0, len(processed))
 }
 
