@@ -62,6 +62,22 @@ func (r *Router[T]) done(node *Node[T], item *T) {
 	state := r.state[item]
 	state.done(node)
 
+	r.advanceNext(state, item)
+}
+
+func (r *Router[T]) Run() {
+	for _, node := range r.nodes {
+		node.Run()
+	}
+}
+
+func (r *Router[T]) Send(item *T, slip *RoutingSlip[T]) {
+	state := slip.start()
+
+	r.advanceNext(state, item)
+}
+
+func (r *Router[T]) advanceNext(state *RoutingSlipState[T], item *T) {
 	next := state.advance()
 	r.state[item] = next
 
@@ -73,20 +89,6 @@ func (r *Router[T]) done(node *Node[T], item *T) {
 	next.send(item)
 }
 
-func (r *Router[T]) Run() {
-	for _, node := range r.nodes {
-		node.Run()
-	}
-}
-
-func (r *Router[T]) Send(item *T, slip *RoutingSlip[T]) {
-	next := slip.head
-	r.state[item] = &RoutingSlipState[T]{
-		node: next,
-	}
-	next.Send(item)
-}
-
 func (r *Router[T]) Close() {
 	for _, node := range r.nodes {
 		node.Close()
@@ -96,6 +98,10 @@ func (r *Router[T]) Close() {
 type RoutingSlipNode[T any] struct {
 	node *Node[T]
 	next *RoutingSlipNode[T]
+}
+
+func (rsn *RoutingSlipNode[T]) Send(item *T) {
+	rsn.node.Send(item)
 }
 
 type RoutingSlipState[T any] struct {
@@ -120,10 +126,6 @@ func (t *RoutingSlipState[T]) send(item *T) {
 	t.node.Send(item)
 }
 
-func (rsn *RoutingSlipNode[T]) Send(item *T) {
-	rsn.node.Send(item)
-}
-
 type RoutingSlip[T any] struct {
 	head *RoutingSlipNode[T]
 }
@@ -146,6 +148,15 @@ func (s *RoutingSlip[T]) Add(node *Node[T]) *RoutingSlipNode[T] {
 	}
 
 	return rsn
+}
+
+func (s *RoutingSlip[T]) start() *RoutingSlipState[T] {
+	return &RoutingSlipState[T]{
+		node: &RoutingSlipNode[T]{
+			node: nil,
+			next: s.head,
+		},
+	}
 }
 
 func TestSingleNodeSlip(t *testing.T) {
@@ -195,7 +206,6 @@ func TestMultiNodeSlip(t *testing.T) {
 	slip.Add(nodeB)
 
 	router.Send(item, slip)
-	router.Close()
 
 	assert.Equal(t, "foo.A.B", item.Text)
 	assert.Equal(t, "foo.A.B", completedText, "Should complete only at the final stage")
