@@ -3,6 +3,7 @@ package routing
 import (
 	"github.com/stretchr/testify/assert"
 	"simpipe/blocks"
+	"sync"
 	"testing"
 )
 
@@ -27,16 +28,23 @@ func (n *Node[T]) Close() {
 	close(n.in)
 }
 
+type NodeAck[T any] struct {
+	Item *T
+	Node *Node[T]
+}
+
 type Router[T any] struct {
 	nodes      []*Node[T]
 	completion func(item *T)
 	state      map[*T]*RoutingSlipState[T]
+	ack        chan NodeAck[T]
 }
 
 func CreateRouter[T any](completion func(item *T)) *Router[T] {
 	return &Router[T]{
 		completion: completion,
 		state:      make(map[*T]*RoutingSlipState[T]),
+		ack:        make(chan NodeAck[T]),
 	}
 }
 
@@ -47,7 +55,10 @@ func (r *Router[T]) AddNode(parallelism int, action func(item *T)) *Node[T] {
 	node.block = &blocks.ActionBlock[*T]{
 		Input: node.in,
 		Done: func(item *T) {
-			r.done(node, item)
+			r.ack <- NodeAck[T]{
+				Item: item,
+				Node: node,
+			}
 		},
 		Parallelism: parallelism,
 		Action:      action,
@@ -66,9 +77,23 @@ func (r *Router[T]) done(node *Node[T], item *T) {
 }
 
 func (r *Router[T]) Run() {
+	r.processNodeAck()
+	r.runNodes()
+}
+
+func (r *Router[T]) runNodes() {
 	for _, node := range r.nodes {
 		node.Run()
 	}
+}
+
+func (r *Router[T]) processNodeAck() {
+	go func() {
+		for {
+			ack := <-r.ack
+			r.done(ack.Node, ack.Item)
+		}
+	}()
 }
 
 func (r *Router[T]) Send(item *T, slip *RoutingSlip[T]) {
@@ -161,10 +186,12 @@ func (s *RoutingSlip[T]) start() *RoutingSlipState[T] {
 
 func TestSingleNodeSlip(t *testing.T) {
 	item := &Item{"foo"}
+	var waiter sync.WaitGroup
 
 	var completed *Item
 	router := CreateRouter(func(item *Item) {
 		completed = item
+		waiter.Done()
 	})
 
 	node := router.AddNode(1, func(item *Item) {
@@ -175,8 +202,9 @@ func TestSingleNodeSlip(t *testing.T) {
 	slip := &RoutingSlip[Item]{}
 	slip.Add(node)
 
+	waiter.Add(1)
 	router.Send(item, slip)
-	router.Close()
+	waiter.Wait()
 
 	assert.Equal(t, "processed", item.Text)
 	assert.Equal(t, item, completed)
@@ -184,12 +212,14 @@ func TestSingleNodeSlip(t *testing.T) {
 
 func TestMultiNodeSlip(t *testing.T) {
 	item := &Item{"foo"}
+	var waiter sync.WaitGroup
 
 	var completed *Item
 	var completedText string
 	router := CreateRouter(func(item *Item) {
 		completed = item
 		completedText = item.Text
+		waiter.Done()
 	})
 
 	nodeA := router.AddNode(1, func(item *Item) {
@@ -205,7 +235,9 @@ func TestMultiNodeSlip(t *testing.T) {
 	slip.Add(nodeA)
 	slip.Add(nodeB)
 
+	waiter.Add(1)
 	router.Send(item, slip)
+	waiter.Wait()
 
 	assert.Equal(t, "foo.A.B", item.Text)
 	assert.Equal(t, "foo.A.B", completedText, "Should complete only at the final stage")
