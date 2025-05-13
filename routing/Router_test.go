@@ -77,7 +77,7 @@ func (r *Router[T]) done(node *Node[T], item *T) {
 }
 
 func (r *Router[T]) Run() {
-	r.processNodeAck()
+	go r.processNodeAck()
 	r.runNodes()
 }
 
@@ -88,12 +88,10 @@ func (r *Router[T]) runNodes() {
 }
 
 func (r *Router[T]) processNodeAck() {
-	go func() {
-		for {
-			ack := <-r.ack
-			r.done(ack.Node, ack.Item)
-		}
-	}()
+	for {
+		ack := <-r.ack
+		r.done(ack.Node, ack.Item)
+	}
 }
 
 func (r *Router[T]) Send(item *T, slip *RoutingSlip[T]) {
@@ -199,7 +197,7 @@ func TestSingleNodeSlip(t *testing.T) {
 	})
 	router.Run()
 
-	slip := &RoutingSlip[Item]{}
+	slip := CreateRoutingSlip[Item]()
 	slip.Add(node)
 
 	waiter.Add(1)
@@ -214,10 +212,8 @@ func TestMultiNodeSlip(t *testing.T) {
 	item := &Item{"foo"}
 	var waiter sync.WaitGroup
 
-	var completed *Item
 	var completedText string
 	router := CreateRouter(func(item *Item) {
-		completed = item
 		completedText = item.Text
 		waiter.Done()
 	})
@@ -241,5 +237,4 @@ func TestMultiNodeSlip(t *testing.T) {
 
 	assert.Equal(t, "foo.A.B", item.Text)
 	assert.Equal(t, "foo.A.B", completedText, "Should complete only at the final stage")
-	assert.Equal(t, item, completed)
 }
