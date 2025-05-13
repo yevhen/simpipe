@@ -30,13 +30,13 @@ func (n *Node[T]) Close() {
 type Router[T any] struct {
 	nodes      []*Node[T]
 	completion func(item *T)
-	state      map[*T]*RoutingSlipNode[T]
+	state      map[*T]*RoutingSlipState[T]
 }
 
 func CreateRouter[T any](completion func(item *T)) *Router[T] {
 	return &Router[T]{
 		completion: completion,
-		state:      make(map[*T]*RoutingSlipNode[T]),
+		state:      make(map[*T]*RoutingSlipState[T]),
 	}
 }
 
@@ -47,7 +47,7 @@ func (r *Router[T]) AddNode(parallelism int, action func(item *T)) *Node[T] {
 	node.block = &blocks.ActionBlock[*T]{
 		Input: node.in,
 		Done: func(item *T) {
-			r.nodeDone(node, item)
+			r.done(node, item)
 		},
 		Parallelism: parallelism,
 		Action:      action,
@@ -58,13 +58,19 @@ func (r *Router[T]) AddNode(parallelism int, action func(item *T)) *Node[T] {
 	return node
 }
 
-func (r *Router[T]) nodeDone(node *Node[T], item *T) {
-	next := r.state[item].next
+func (r *Router[T]) done(node *Node[T], item *T) {
+	state := r.state[item]
+	state.done(node)
+
+	next := state.advance()
+	r.state[item] = next
+
 	if next == nil {
 		r.completion(item)
 		return
 	}
-	r.sendNext(item, next)
+
+	next.send(item)
 }
 
 func (r *Router[T]) Run() {
@@ -75,11 +81,9 @@ func (r *Router[T]) Run() {
 
 func (r *Router[T]) Send(item *T, slip *RoutingSlip[T]) {
 	next := slip.head
-	r.sendNext(item, next)
-}
-
-func (r *Router[T]) sendNext(item *T, next *RoutingSlipNode[T]) {
-	r.state[item] = next
+	r.state[item] = &RoutingSlipState[T]{
+		node: next,
+	}
 	next.Send(item)
 }
 
@@ -94,12 +98,38 @@ type RoutingSlipNode[T any] struct {
 	next *RoutingSlipNode[T]
 }
 
-func (rsn RoutingSlipNode[T]) Send(item *T) {
+type RoutingSlipState[T any] struct {
+	node *RoutingSlipNode[T]
+}
+
+func (t *RoutingSlipState[T]) done(node *Node[T]) {
+	// do nothing for now
+}
+
+func (t *RoutingSlipState[T]) advance() *RoutingSlipState[T] {
+	if t.node.next == nil {
+		return nil
+	}
+
+	return &RoutingSlipState[T]{
+		node: t.node.next,
+	}
+}
+
+func (t *RoutingSlipState[T]) send(item *T) {
+	t.node.Send(item)
+}
+
+func (rsn *RoutingSlipNode[T]) Send(item *T) {
 	rsn.node.Send(item)
 }
 
 type RoutingSlip[T any] struct {
 	head *RoutingSlipNode[T]
+}
+
+func CreateRoutingSlip[T any]() *RoutingSlip[T] {
+	return &RoutingSlip[T]{}
 }
 
 func (s *RoutingSlip[T]) Add(node *Node[T]) *RoutingSlipNode[T] {
@@ -160,7 +190,7 @@ func TestMultiNodeSlip(t *testing.T) {
 
 	router.Run()
 
-	slip := &RoutingSlip[Item]{}
+	slip := CreateRoutingSlip[Item]()
 	slip.Add(nodeA)
 	slip.Add(nodeB)
 
