@@ -7,234 +7,236 @@ import (
 	"testing"
 )
 
-type Item struct {
+type Message struct {
 	Text string
 }
 
-type Node[T any] struct {
+type Processor[T any] struct {
 	in    chan *T
 	block *blocks.ActionBlock[*T]
 }
 
-func (n *Node[T]) Run() {
+func (n *Processor[T]) Run() {
 	n.block.Run()
 }
 
-func (n *Node[T]) Send(item *T) {
-	n.in <- item
+func (n *Processor[T]) Send(message *T) {
+	n.in <- message
 }
 
-func (n *Node[T]) Close() {
+func (n *Processor[T]) Close() {
 	close(n.in)
 }
 
-type NodeAck[T any] struct {
-	Item *T
-	Node *Node[T]
+type StepCompletion[T any] struct {
+	message   *T
+	Processor *Processor[T]
 }
 
-type Router[T any] struct {
-	nodes      []*Node[T]
-	completion func(item *T)
-	state      map[*T]*RoutingSlipState[T]
-	ack        chan NodeAck[T]
+type Pipeline[T any] struct {
+	processors  []*Processor[T]
+	done        func(message *T)
+	state       map[*T]*PipelineState[T]
+	completions chan StepCompletion[T]
 }
 
-func CreateRouter[T any](completion func(item *T)) *Router[T] {
-	return &Router[T]{
-		completion: completion,
-		state:      make(map[*T]*RoutingSlipState[T]),
-		ack:        make(chan NodeAck[T]),
+func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
+	return &Pipeline[T]{
+		done:        done,
+		state:       make(map[*T]*PipelineState[T]),
+		completions: make(chan StepCompletion[T]),
 	}
 }
 
-func (r *Router[T]) AddNode(parallelism int, action func(item *T)) *Node[T] {
-	node := &Node[T]{}
+func (r *Pipeline[T]) AddProcessor(parallelism int, action func(message *T)) *Processor[T] {
+	processor := &Processor[T]{}
 
-	node.in = make(chan *T)
-	node.block = &blocks.ActionBlock[*T]{
-		Input: node.in,
-		Done: func(item *T) {
-			r.ack <- NodeAck[T]{
-				Item: item,
-				Node: node,
+	processor.in = make(chan *T)
+	processor.block = &blocks.ActionBlock[*T]{
+		Input: processor.in,
+		Done: func(message *T) {
+			r.completions <- StepCompletion[T]{
+				message:   message,
+				Processor: processor,
 			}
 		},
 		Parallelism: parallelism,
 		Action:      action,
 	}
 
-	r.nodes = append(r.nodes, node)
+	r.processors = append(r.processors, processor)
 
-	return node
+	return processor
 }
 
-func (r *Router[T]) done(node *Node[T], item *T) {
-	state := r.state[item]
-	state.done(node)
+func (r *Pipeline[T]) trackDone(processor *Processor[T], message *T) {
+	state := r.state[message]
+	state.done(processor)
 
-	r.advanceNext(state, item)
+	r.advanceNext(state, message)
 }
 
-func (r *Router[T]) Run() {
-	go r.processNodeAck()
-	r.runNodes()
+func (r *Pipeline[T]) Run() {
+	go r.processCompletions()
+	r.runProcessors()
 }
 
-func (r *Router[T]) runNodes() {
-	for _, node := range r.nodes {
-		node.Run()
+func (r *Pipeline[T]) runProcessors() {
+	for _, processor := range r.processors {
+		processor.Run()
 	}
 }
 
-func (r *Router[T]) processNodeAck() {
+func (r *Pipeline[T]) processCompletions() {
 	for {
-		ack := <-r.ack
-		r.done(ack.Node, ack.Item)
+		ack := <-r.completions
+		r.trackDone(ack.Processor, ack.message)
 	}
 }
 
-func (r *Router[T]) Send(item *T, slip *RoutingSlip[T]) {
-	state := slip.start()
+func (r *Pipeline[T]) Send(message *T, steps *ProcessingSteps[T]) {
+	state := steps.start()
 
-	r.advanceNext(state, item)
+	r.advanceNext(state, message)
 }
 
-func (r *Router[T]) advanceNext(state *RoutingSlipState[T], item *T) {
+func (r *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 	next := state.advance()
-	r.state[item] = next
+	r.state[message] = next
 
 	if next == nil {
-		r.completion(item)
+		r.done(message)
 		return
 	}
 
-	next.send(item)
+	next.send(message)
 }
 
-func (r *Router[T]) Close() {
-	for _, node := range r.nodes {
-		node.Close()
+func (r *Pipeline[T]) Close() {
+	close(r.completions)
+
+	for _, processor := range r.processors {
+		processor.Close()
 	}
 }
 
-type RoutingSlipNode[T any] struct {
-	node *Node[T]
-	next *RoutingSlipNode[T]
+type Step[T any] struct {
+	processor *Processor[T]
+	next      *Step[T]
 }
 
-func (rsn *RoutingSlipNode[T]) Send(item *T) {
-	rsn.node.Send(item)
+func (rsn *Step[T]) Send(message *T) {
+	rsn.processor.Send(message)
 }
 
-type RoutingSlipState[T any] struct {
-	node *RoutingSlipNode[T]
+type PipelineState[T any] struct {
+	step *Step[T]
 }
 
-func (t *RoutingSlipState[T]) done(node *Node[T]) {
+func (t *PipelineState[T]) done(processor *Processor[T]) {
 	// do nothing for now
 }
 
-func (t *RoutingSlipState[T]) advance() *RoutingSlipState[T] {
-	if t.node.next == nil {
+func (t *PipelineState[T]) advance() *PipelineState[T] {
+	if t.step.next == nil {
 		return nil
 	}
 
-	return &RoutingSlipState[T]{
-		node: t.node.next,
+	return &PipelineState[T]{
+		step: t.step.next,
 	}
 }
 
-func (t *RoutingSlipState[T]) send(item *T) {
-	t.node.Send(item)
+func (t *PipelineState[T]) send(message *T) {
+	t.step.Send(message)
 }
 
-type RoutingSlip[T any] struct {
-	head *RoutingSlipNode[T]
+type ProcessingSteps[T any] struct {
+	head *Step[T]
 }
 
-func CreateRoutingSlip[T any]() *RoutingSlip[T] {
-	return &RoutingSlip[T]{}
+func CreateProcessingSteps[T any]() *ProcessingSteps[T] {
+	return &ProcessingSteps[T]{}
 }
 
-func (s *RoutingSlip[T]) Add(node *Node[T]) *RoutingSlipNode[T] {
-	rsn := &RoutingSlipNode[T]{
-		node: node,
+func (s *ProcessingSteps[T]) Add(processor *Processor[T]) *Step[T] {
+	step := &Step[T]{
+		processor: processor,
 	}
 
 	if s.head != nil {
-		s.head.next = rsn
+		s.head.next = step
 	}
 
 	if s.head == nil {
-		s.head = rsn
+		s.head = step
 	}
 
-	return rsn
+	return step
 }
 
-func (s *RoutingSlip[T]) start() *RoutingSlipState[T] {
-	return &RoutingSlipState[T]{
-		node: &RoutingSlipNode[T]{
-			node: nil,
-			next: s.head,
+func (s *ProcessingSteps[T]) start() *PipelineState[T] {
+	return &PipelineState[T]{
+		step: &Step[T]{
+			processor: nil,
+			next:      s.head,
 		},
 	}
 }
 
-func TestSingleNodeSlip(t *testing.T) {
-	item := &Item{"foo"}
+func TestSingleStepPipeline(t *testing.T) {
+	message := &Message{"foo"}
 	var waiter sync.WaitGroup
 
-	var completed *Item
-	router := CreateRouter(func(item *Item) {
-		completed = item
+	var completed *Message
+	pipeline := NewPipeline(func(message *Message) {
+		completed = message
 		waiter.Done()
 	})
 
-	node := router.AddNode(1, func(item *Item) {
-		item.Text = "processed"
+	processor := pipeline.AddProcessor(1, func(message *Message) {
+		message.Text = "processed"
 	})
-	router.Run()
+	pipeline.Run()
 
-	slip := CreateRoutingSlip[Item]()
-	slip.Add(node)
+	steps := CreateProcessingSteps[Message]()
+	steps.Add(processor)
 
 	waiter.Add(1)
-	router.Send(item, slip)
+	pipeline.Send(message, steps)
 	waiter.Wait()
 
-	assert.Equal(t, "processed", item.Text)
-	assert.Equal(t, item, completed)
+	assert.Equal(t, "processed", message.Text)
+	assert.Equal(t, message, completed)
 }
 
-func TestMultiNodeSlip(t *testing.T) {
-	item := &Item{"foo"}
+func TestMultiStepPipeline(t *testing.T) {
+	message := &Message{"foo"}
 	var waiter sync.WaitGroup
 
 	var completedText string
-	router := CreateRouter(func(item *Item) {
-		completedText = item.Text
+	pipeline := NewPipeline(func(message *Message) {
+		completedText = message.Text
 		waiter.Done()
 	})
 
-	nodeA := router.AddNode(1, func(item *Item) {
-		item.Text += ".A"
+	processorA := pipeline.AddProcessor(1, func(message *Message) {
+		message.Text += ".A"
 	})
-	nodeB := router.AddNode(1, func(item *Item) {
-		item.Text += ".B"
+	processorB := pipeline.AddProcessor(1, func(message *Message) {
+		message.Text += ".B"
 	})
 
-	router.Run()
+	pipeline.Run()
 
-	slip := CreateRoutingSlip[Item]()
-	slip.Add(nodeA)
-	slip.Add(nodeB)
+	steps := CreateProcessingSteps[Message]()
+	steps.Add(processorA)
+	steps.Add(processorB)
 
 	waiter.Add(1)
-	router.Send(item, slip)
+	pipeline.Send(message, steps)
 	waiter.Wait()
 
-	assert.Equal(t, "foo.A.B", item.Text)
-	assert.Equal(t, "foo.A.B", completedText, "Should complete only at the final stage")
+	assert.Equal(t, "foo.A.B", message.Text)
+	assert.Equal(t, "foo.A.B", completedText, "Should complete only at the final step")
 }
