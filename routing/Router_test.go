@@ -46,14 +46,18 @@ type Pipeline[T any] struct {
 }
 
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
-	return &Pipeline[T]{
+	pipeline := &Pipeline[T]{
 		done:        done,
 		state:       make(map[*T]*PipelineState[T]),
 		completions: make(chan StepCompletion[T]),
 	}
+
+	go pipeline.processCompletions()
+
+	return pipeline
 }
 
-func (r *Pipeline[T]) AddProcessor(parallelism int, action func(message *T)) *Processor[T] {
+func NewActionProcessor[T any](parallelism int, action func(message *T)) *Processor[T] {
 	processor := &Processor[T]{}
 
 	processor.in = make(chan Message[T])
@@ -66,7 +70,7 @@ func (r *Pipeline[T]) AddProcessor(parallelism int, action func(message *T)) *Pr
 		Action:      func(message Message[T]) { action(message.Payload) },
 	}
 
-	r.processors = append(r.processors, processor)
+	processor.block.Run()
 
 	return processor
 }
@@ -76,17 +80,6 @@ func (r *Pipeline[T]) trackDone(processor *Processor[T], message *T) {
 	state.done(processor)
 
 	r.advanceNext(state, message)
-}
-
-func (r *Pipeline[T]) Run() {
-	go r.processCompletions()
-	r.runProcessors()
-}
-
-func (r *Pipeline[T]) runProcessors() {
-	for _, processor := range r.processors {
-		processor.Run()
-	}
 }
 
 func (r *Pipeline[T]) processCompletions() {
@@ -120,14 +113,6 @@ func (r *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 			}
 		},
 	})
-}
-
-func (r *Pipeline[T]) Close() {
-	close(r.completions)
-
-	for _, processor := range r.processors {
-		processor.Close()
-	}
 }
 
 type Step[T any] struct {
@@ -204,10 +189,9 @@ func TestSingleStepPipeline(t *testing.T) {
 		waiter.Done()
 	})
 
-	processor := pipeline.AddProcessor(1, func(message *Item) {
+	processor := NewActionProcessor(1, func(message *Item) {
 		message.Text = "processed"
 	})
-	pipeline.Run()
 
 	steps := CreateProcessingSteps[Item]()
 	steps.Add(processor)
@@ -230,14 +214,12 @@ func TestMultiStepPipeline(t *testing.T) {
 		waiter.Done()
 	})
 
-	processorA := pipeline.AddProcessor(1, func(message *Item) {
+	processorA := NewActionProcessor(1, func(message *Item) {
 		message.Text += ".A"
 	})
-	processorB := pipeline.AddProcessor(1, func(message *Item) {
+	processorB := NewActionProcessor(1, func(message *Item) {
 		message.Text += ".B"
 	})
-
-	pipeline.Run()
 
 	steps := CreateProcessingSteps[Item]()
 	steps.Add(processorA)
