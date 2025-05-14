@@ -7,20 +7,25 @@ import (
 	"testing"
 )
 
-type Message struct {
+type Message[T any] struct {
+	Payload *T
+	Ack     func(processor *Processor[T], payload *T)
+}
+
+type Item struct {
 	Text string
 }
 
 type Processor[T any] struct {
-	in    chan *T
-	block *blocks.ActionBlock[*T]
+	in    chan Message[T]
+	block *blocks.ActionBlock[Message[T]]
 }
 
 func (n *Processor[T]) Run() {
 	n.block.Run()
 }
 
-func (n *Processor[T]) Send(message *T) {
+func (n *Processor[T]) Send(message Message[T]) {
 	n.in <- message
 }
 
@@ -51,17 +56,14 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 func (r *Pipeline[T]) AddProcessor(parallelism int, action func(message *T)) *Processor[T] {
 	processor := &Processor[T]{}
 
-	processor.in = make(chan *T)
-	processor.block = &blocks.ActionBlock[*T]{
+	processor.in = make(chan Message[T])
+	processor.block = &blocks.ActionBlock[Message[T]]{
 		Input: processor.in,
-		Done: func(message *T) {
-			r.completions <- StepCompletion[T]{
-				message:   message,
-				Processor: processor,
-			}
+		Done: func(message Message[T]) {
+			message.Ack(processor, message.Payload)
 		},
 		Parallelism: parallelism,
-		Action:      action,
+		Action:      func(message Message[T]) { action(message.Payload) },
 	}
 
 	r.processors = append(r.processors, processor)
@@ -109,7 +111,15 @@ func (r *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 		return
 	}
 
-	next.send(message)
+	next.send(Message[T]{
+		Payload: message,
+		Ack: func(processor *Processor[T], payload *T) {
+			r.completions <- StepCompletion[T]{
+				message:   payload,
+				Processor: processor,
+			}
+		},
+	})
 }
 
 func (r *Pipeline[T]) Close() {
@@ -125,8 +135,8 @@ type Step[T any] struct {
 	next      *Step[T]
 }
 
-func (rsn *Step[T]) Send(message *T) {
-	rsn.processor.Send(message)
+func (s *Step[T]) Send(message Message[T]) {
+	s.processor.Send(message)
 }
 
 type PipelineState[T any] struct {
@@ -147,7 +157,7 @@ func (t *PipelineState[T]) advance() *PipelineState[T] {
 	}
 }
 
-func (t *PipelineState[T]) send(message *T) {
+func (t *PipelineState[T]) send(message Message[T]) {
 	t.step.Send(message)
 }
 
@@ -185,21 +195,21 @@ func (s *ProcessingSteps[T]) start() *PipelineState[T] {
 }
 
 func TestSingleStepPipeline(t *testing.T) {
-	message := &Message{"foo"}
+	message := &Item{"foo"}
 	var waiter sync.WaitGroup
 
-	var completed *Message
-	pipeline := NewPipeline(func(message *Message) {
+	var completed *Item
+	pipeline := NewPipeline(func(message *Item) {
 		completed = message
 		waiter.Done()
 	})
 
-	processor := pipeline.AddProcessor(1, func(message *Message) {
+	processor := pipeline.AddProcessor(1, func(message *Item) {
 		message.Text = "processed"
 	})
 	pipeline.Run()
 
-	steps := CreateProcessingSteps[Message]()
+	steps := CreateProcessingSteps[Item]()
 	steps.Add(processor)
 
 	waiter.Add(1)
@@ -211,25 +221,25 @@ func TestSingleStepPipeline(t *testing.T) {
 }
 
 func TestMultiStepPipeline(t *testing.T) {
-	message := &Message{"foo"}
+	message := &Item{"foo"}
 	var waiter sync.WaitGroup
 
 	var completedText string
-	pipeline := NewPipeline(func(message *Message) {
+	pipeline := NewPipeline(func(message *Item) {
 		completedText = message.Text
 		waiter.Done()
 	})
 
-	processorA := pipeline.AddProcessor(1, func(message *Message) {
+	processorA := pipeline.AddProcessor(1, func(message *Item) {
 		message.Text += ".A"
 	})
-	processorB := pipeline.AddProcessor(1, func(message *Message) {
+	processorB := pipeline.AddProcessor(1, func(message *Item) {
 		message.Text += ".B"
 	})
 
 	pipeline.Run()
 
-	steps := CreateProcessingSteps[Message]()
+	steps := CreateProcessingSteps[Item]()
 	steps.Add(processorA)
 	steps.Add(processorB)
 
