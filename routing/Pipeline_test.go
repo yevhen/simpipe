@@ -58,6 +58,7 @@ type Pipeline[T any] struct {
 	state       map[*T]*PipelineState[T]
 	completions chan StepCompletion[T]
 	first       *Step[T]
+	last        *Step[T]
 }
 
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
@@ -91,9 +92,11 @@ func (p *Pipeline[T]) Add(processor *Processor[T]) *Pipeline[T] {
 		processor: processor,
 	}
 
-	if p.first != nil {
-		p.first.next = step
+	if p.last != nil {
+		p.last.next = step
 	}
+
+	p.last = step
 
 	if p.first == nil {
 		p.first = step
@@ -212,14 +215,18 @@ func TestMultiStepPipeline(t *testing.T) {
 	processorB := NewActionProcessor(1, func(message *Item) {
 		message.Text += ".B"
 	})
+	processorC := NewActionProcessor(1, func(message *Item) {
+		message.Text += ".C"
+	})
 
 	pipeline.Add(processorA)
 	pipeline.Add(processorB)
+	pipeline.Add(processorC)
 
 	waiter.Add(1)
 	pipeline.Send(message)
 	waiter.Wait()
 
-	assert.Equal(t, "foo.A.B", message.Text)
-	assert.Equal(t, "foo.A.B", completedText, "Should complete only at the final step")
+	assert.Equal(t, "foo.A.B.C", message.Text)
+	assert.Equal(t, "foo.A.B.C", completedText, "Should complete only at the final step")
 }
