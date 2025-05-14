@@ -43,7 +43,7 @@ type Pipeline[T any] struct {
 	done        func(message *T)
 	state       map[*T]*PipelineState[T]
 	completions chan StepCompletion[T]
-	steps       *ProcessingSteps[T]
+	head        *Step[T]
 }
 
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
@@ -51,7 +51,6 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 		done:        done,
 		state:       make(map[*T]*PipelineState[T]),
 		completions: make(chan StepCompletion[T]),
-		steps:       CreateProcessingSteps[T](),
 	}
 
 	go pipeline.processCompletions()
@@ -77,48 +76,69 @@ func NewActionProcessor[T any](parallelism int, action func(message *T)) *Proces
 	return processor
 }
 
-func (r *Pipeline[T]) trackDone(processor *Processor[T], message *T) {
-	state := r.state[message]
+func (p *Pipeline[T]) trackDone(processor *Processor[T], message *T) {
+	state := p.state[message]
 	state.done(processor)
 
-	r.advanceNext(state, message)
+	p.advanceNext(state, message)
 }
 
-func (r *Pipeline[T]) processCompletions() {
+func (p *Pipeline[T]) processCompletions() {
 	for {
-		ack := <-r.completions
-		r.trackDone(ack.Processor, ack.message)
+		ack := <-p.completions
+		p.trackDone(ack.Processor, ack.message)
 	}
 }
 
-func (r *Pipeline[T]) Send(message *T) {
-	state := r.steps.start()
+func (p *Pipeline[T]) Add(processor *Processor[T]) *Pipeline[T] {
+	step := &Step[T]{
+		processor: processor,
+	}
 
-	r.advanceNext(state, message)
+	if p.head != nil {
+		p.head.next = step
+	}
+
+	if p.head == nil {
+		p.head = step
+	}
+
+	return p
 }
 
-func (r *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
+func (p *Pipeline[T]) Send(message *T) {
+	state := p.start()
+
+	p.advanceNext(state, message)
+}
+
+func (p *Pipeline[T]) start() *PipelineState[T] {
+	return &PipelineState[T]{
+		step: &Step[T]{
+			processor: nil,
+			next:      p.head,
+		},
+	}
+}
+
+func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 	next := state.advance()
-	r.state[message] = next
+	p.state[message] = next
 
 	if next == nil {
-		r.done(message)
+		p.done(message)
 		return
 	}
 
 	next.send(Message[T]{
 		Payload: message,
 		Ack: func(processor *Processor[T], payload *T) {
-			r.completions <- StepCompletion[T]{
+			p.completions <- StepCompletion[T]{
 				message:   payload,
 				Processor: processor,
 			}
 		},
 	})
-}
-
-func (r *Pipeline[T]) Add(processor *Processor[T]) {
-	r.steps.Add(processor)
 }
 
 type Step[T any] struct {
@@ -150,39 +170,6 @@ func (t *PipelineState[T]) advance() *PipelineState[T] {
 
 func (t *PipelineState[T]) send(message Message[T]) {
 	t.step.Send(message)
-}
-
-type ProcessingSteps[T any] struct {
-	head *Step[T]
-}
-
-func CreateProcessingSteps[T any]() *ProcessingSteps[T] {
-	return &ProcessingSteps[T]{}
-}
-
-func (s *ProcessingSteps[T]) Add(processor *Processor[T]) *Step[T] {
-	step := &Step[T]{
-		processor: processor,
-	}
-
-	if s.head != nil {
-		s.head.next = step
-	}
-
-	if s.head == nil {
-		s.head = step
-	}
-
-	return step
-}
-
-func (s *ProcessingSteps[T]) start() *PipelineState[T] {
-	return &PipelineState[T]{
-		step: &Step[T]{
-			processor: nil,
-			next:      s.head,
-		},
-	}
 }
 
 func TestSingleStepPipeline(t *testing.T) {
