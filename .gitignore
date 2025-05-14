@@ -22,3 +22,4 @@ go.work
 
 # macOS Finder directory metadata
 .DS_Store
+/.history/
