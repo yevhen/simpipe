@@ -43,6 +43,7 @@ type Pipeline[T any] struct {
 	done        func(message *T)
 	state       map[*T]*PipelineState[T]
 	completions chan StepCompletion[T]
+	steps       *ProcessingSteps[T]
 }
 
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
@@ -50,6 +51,7 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 		done:        done,
 		state:       make(map[*T]*PipelineState[T]),
 		completions: make(chan StepCompletion[T]),
+		steps:       CreateProcessingSteps[T](),
 	}
 
 	go pipeline.processCompletions()
@@ -89,8 +91,8 @@ func (r *Pipeline[T]) processCompletions() {
 	}
 }
 
-func (r *Pipeline[T]) Send(message *T, steps *ProcessingSteps[T]) {
-	state := steps.start()
+func (r *Pipeline[T]) Send(message *T) {
+	state := r.steps.start()
 
 	r.advanceNext(state, message)
 }
@@ -113,6 +115,10 @@ func (r *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 			}
 		},
 	})
+}
+
+func (r *Pipeline[T]) Add(processor *Processor[T]) {
+	r.steps.Add(processor)
 }
 
 type Step[T any] struct {
@@ -193,11 +199,10 @@ func TestSingleStepPipeline(t *testing.T) {
 		message.Text = "processed"
 	})
 
-	steps := CreateProcessingSteps[Item]()
-	steps.Add(processor)
+	pipeline.Add(processor)
 
 	waiter.Add(1)
-	pipeline.Send(message, steps)
+	pipeline.Send(message)
 	waiter.Wait()
 
 	assert.Equal(t, "processed", message.Text)
@@ -221,12 +226,11 @@ func TestMultiStepPipeline(t *testing.T) {
 		message.Text += ".B"
 	})
 
-	steps := CreateProcessingSteps[Item]()
-	steps.Add(processorA)
-	steps.Add(processorB)
+	pipeline.Add(processorA)
+	pipeline.Add(processorB)
 
 	waiter.Add(1)
-	pipeline.Send(message, steps)
+	pipeline.Send(message)
 	waiter.Wait()
 
 	assert.Equal(t, "foo.A.B", message.Text)
