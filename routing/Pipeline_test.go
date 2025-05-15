@@ -24,7 +24,7 @@ func TestSingleStepPipeline(t *testing.T) {
 		message.Text = "processed"
 	})
 
-	pipeline.Add(processor)
+	pipeline.AddProcessor(processor)
 
 	waiter.Add(1)
 	pipeline.Send(message)
@@ -54,9 +54,9 @@ func TestMultiStepPipeline(t *testing.T) {
 		message.Text += ".C"
 	})
 
-	pipeline.Add(processorA)
-	pipeline.Add(processorB)
-	pipeline.Add(processorC)
+	pipeline.AddProcessor(processorA)
+	pipeline.AddProcessor(processorB)
+	pipeline.AddProcessor(processorC)
 
 	waiter.Add(1)
 	pipeline.Send(message)
@@ -87,7 +87,7 @@ func TestFork(t *testing.T) {
 	})
 
 	pipeline.AddFork(processorA, processorB)
-	pipeline.Add(processorC)
+	pipeline.AddProcessor(processorC)
 
 	waiter.Add(1)
 	pipeline.Send(message)

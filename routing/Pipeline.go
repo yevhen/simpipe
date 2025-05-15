@@ -58,12 +58,12 @@ func (p *Pipeline[T]) processCompletions() {
 	}
 }
 
-func (p *Pipeline[T]) Add(processor *Processor[T]) *Pipeline[T] {
+func (p *Pipeline[T]) AddProcessor(processor *Processor[T]) *Pipeline[T] {
 	step := &ProcessorStep[T]{
 		processor: processor,
 	}
 
-	return p.chain(step)
+	return p.Add(step)
 }
 
 func (p *Pipeline[T]) AddFork(processors ...*Processor[T]) *Pipeline[T] {
@@ -71,10 +71,10 @@ func (p *Pipeline[T]) AddFork(processors ...*Processor[T]) *Pipeline[T] {
 		processors: processors,
 	}
 
-	return p.chain(fork)
+	return p.Add(fork)
 }
 
-func (p *Pipeline[T]) chain(step Step[T]) *Pipeline[T] {
+func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 	if p.last != nil {
 		p.last.Link(step)
 	}
