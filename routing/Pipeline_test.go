@@ -77,7 +77,9 @@ func (p *Pipeline[T]) trackDone(message *T) {
 	state := p.state[message]
 	state.done()
 
-	p.advanceNext(state, message)
+	if state.remaining <= 0 {
+		p.advanceNext(state, message)
+	}
 }
 
 func (p *Pipeline[T]) processCompletions() {
