@@ -58,7 +58,7 @@ func (p *Pipeline[T]) processCompletions() {
 	}
 }
 
-func (p *Pipeline[T]) AddProcessor(processor *Processor[T]) *Pipeline[T] {
+func (p *Pipeline[T]) AddProcessor(processor Processor[T]) *Pipeline[T] {
 	step := &ProcessorStep[T]{
 		processor: processor,
 	}
@@ -66,7 +66,7 @@ func (p *Pipeline[T]) AddProcessor(processor *Processor[T]) *Pipeline[T] {
 	return p.Add(step)
 }
 
-func (p *Pipeline[T]) AddFork(processors ...*Processor[T]) *Pipeline[T] {
+func (p *Pipeline[T]) AddFork(processors ...Processor[T]) *Pipeline[T] {
 	fork := &ForkStep[T]{
 		processors: processors,
 	}
@@ -114,7 +114,7 @@ func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 
 	next.send(Message[T]{
 		Payload: message,
-		Ack: func(processor *Processor[T], payload *T) {
+		Ack: func(processor Processor[T], payload *T) {
 			p.completions <- ProcessorCompletion[T]{
 				message:   payload,
 				Processor: processor,

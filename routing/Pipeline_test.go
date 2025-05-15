@@ -4,6 +4,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
+	"time"
 )
 
 type Item struct {
@@ -80,6 +81,7 @@ func TestFork(t *testing.T) {
 		message.Text += "A"
 	})
 	processorB := NewActionProcessor(1, func(message *Item) {
+		time.Sleep(50)
 		message.Text += "B"
 	})
 	processorC := NewActionProcessor(1, func(message *Item) {

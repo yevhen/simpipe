@@ -8,7 +8,7 @@ type Step[T any] interface {
 }
 
 type ProcessorStep[T any] struct {
-	processor *Processor[T]
+	processor Processor[T]
 	next      Step[T]
 }
 
@@ -33,7 +33,7 @@ func (step *ProcessorStep[T]) State() *PipelineState[T] {
 }
 
 type ForkStep[T any] struct {
-	processors []*Processor[T]
+	processors []Processor[T]
 	next       Step[T]
 }
 
