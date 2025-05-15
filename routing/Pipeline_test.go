@@ -57,8 +57,8 @@ type Pipeline[T any] struct {
 	done        func(message *T)
 	state       map[*T]*PipelineState[T]
 	completions chan StepCompletion[T]
-	first       *Step[T]
-	last        *Step[T]
+	first       Step[T]
+	last        Step[T]
 }
 
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
@@ -77,7 +77,7 @@ func (p *Pipeline[T]) trackDone(message *T) {
 	state := p.state[message]
 	state.done()
 
-	if state.remaining <= 0 {
+	if *state.remaining <= 0 {
 		p.advanceNext(state, message)
 	}
 }
@@ -90,12 +90,24 @@ func (p *Pipeline[T]) processCompletions() {
 }
 
 func (p *Pipeline[T]) Add(processor *Processor[T]) *Pipeline[T] {
-	step := &Step[T]{
+	step := &ProcessorStep[T]{
 		processor: processor,
 	}
 
+	return p.chain(step)
+}
+
+func (p *Pipeline[T]) AddFork(processors ...*Processor[T]) *Pipeline[T] {
+	fork := &ForkStep[T]{
+		processors: processors,
+	}
+
+	return p.chain(fork)
+}
+
+func (p *Pipeline[T]) chain(step Step[T]) *Pipeline[T] {
 	if p.last != nil {
-		p.last.next = step
+		p.last.Link(step)
 	}
 
 	p.last = step
@@ -114,12 +126,12 @@ func (p *Pipeline[T]) Send(message *T) {
 }
 
 func (p *Pipeline[T]) start() *PipelineState[T] {
-	return &PipelineState[T]{
-		step: &Step[T]{
-			processor: nil,
-			next:      p.first,
-		},
+	start := &ProcessorStep[T]{
+		processor: nil,
+		next:      p.first,
 	}
+	state := start.State()
+	return state
 }
 
 func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
@@ -142,36 +154,84 @@ func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 	})
 }
 
-type Step[T any] struct {
-	processor *Processor[T]
-	next      *Step[T]
+type Step[T any] interface {
+	Send(message Message[T])
+	Link(next Step[T])
+	Next() Step[T]
+	State() *PipelineState[T]
 }
 
-func (s *Step[T]) Send(message Message[T]) {
-	s.processor.Send(message)
+type ProcessorStep[T any] struct {
+	processor *Processor[T]
+	next      Step[T]
+}
+
+func (step *ProcessorStep[T]) Send(message Message[T]) {
+	step.processor.Send(message)
+}
+
+func (step *ProcessorStep[T]) Link(next Step[T]) {
+	step.next = next
+}
+
+func (step *ProcessorStep[T]) Next() Step[T] {
+	return step.next
+}
+
+func (step *ProcessorStep[T]) State() *PipelineState[T] {
+	processorCount := 0
+	return &PipelineState[T]{
+		step:      step,
+		remaining: &processorCount,
+	}
+}
+
+type ForkStep[T any] struct {
+	processors []*Processor[T]
+	next       Step[T]
+}
+
+func (step *ForkStep[T]) Send(message Message[T]) {
+	for _, processor := range step.processors {
+		processor.Send(message)
+	}
+}
+
+func (step *ForkStep[T]) Link(next Step[T]) {
+	step.next = next
+}
+
+func (step *ForkStep[T]) Next() Step[T] {
+	return step.next
+}
+
+func (step *ForkStep[T]) State() *PipelineState[T] {
+	processorCount := len(step.processors)
+	return &PipelineState[T]{
+		step:      step,
+		remaining: &processorCount,
+	}
 }
 
 type PipelineState[T any] struct {
-	step      *Step[T]
-	remaining int
+	step      Step[T]
+	remaining *int
 }
 
-func (t *PipelineState[T]) done() {
-	t.remaining--
+func (state *PipelineState[T]) done() {
+	*state.remaining--
 }
 
-func (t *PipelineState[T]) advance() *PipelineState[T] {
-	if t.step.next == nil {
+func (state *PipelineState[T]) advance() *PipelineState[T] {
+	if state.step.Next() == nil {
 		return nil
 	}
 
-	return &PipelineState[T]{
-		step: t.step.next,
-	}
+	return state.step.Next().State()
 }
 
-func (t *PipelineState[T]) send(message Message[T]) {
-	t.step.Send(message)
+func (state *PipelineState[T]) send(message Message[T]) {
+	state.step.Send(message)
 }
 
 type Item struct {
@@ -232,4 +292,35 @@ func TestMultiStepPipeline(t *testing.T) {
 
 	assert.Equal(t, "foo.A.B.C", message.Text)
 	assert.Equal(t, "foo.A.B.C", completedText, "Should complete only at the final step")
+}
+
+func TestFork(t *testing.T) {
+	message := &Item{"fork-"}
+	var waiter sync.WaitGroup
+
+	var completedText string
+	pipeline := NewPipeline(func(message *Item) {
+		completedText = message.Text
+		waiter.Done()
+	})
+
+	processorA := NewActionProcessor(1, func(message *Item) {
+		message.Text += "A"
+	})
+	processorB := NewActionProcessor(1, func(message *Item) {
+		message.Text += "B"
+	})
+	processorC := NewActionProcessor(1, func(message *Item) {
+		message.Text += "-C"
+	})
+
+	pipeline.AddFork(processorA, processorB)
+	pipeline.Add(processorC)
+
+	waiter.Add(1)
+	pipeline.Send(message)
+	waiter.Wait()
+
+	assert.Equal(t, "fork-AB-C", message.Text)
+	assert.Equal(t, "fork-AB-C", completedText, "Should advance to next step only after all forked processors done")
 }
