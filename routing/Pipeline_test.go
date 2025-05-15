@@ -73,9 +73,9 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	return pipeline
 }
 
-func (p *Pipeline[T]) trackDone(processor *Processor[T], message *T) {
+func (p *Pipeline[T]) trackDone(message *T) {
 	state := p.state[message]
-	state.done(processor)
+	state.done()
 
 	p.advanceNext(state, message)
 }
@@ -83,7 +83,7 @@ func (p *Pipeline[T]) trackDone(processor *Processor[T], message *T) {
 func (p *Pipeline[T]) processCompletions() {
 	for {
 		ack := <-p.completions
-		p.trackDone(ack.Processor, ack.message)
+		p.trackDone(ack.message)
 	}
 }
 
@@ -150,11 +150,12 @@ func (s *Step[T]) Send(message Message[T]) {
 }
 
 type PipelineState[T any] struct {
-	step *Step[T]
+	step      *Step[T]
+	remaining int
 }
 
-func (t *PipelineState[T]) done(processor *Processor[T]) {
-	// do nothing for now
+func (t *PipelineState[T]) done() {
+	t.remaining--
 }
 
 func (t *PipelineState[T]) advance() *PipelineState[T] {
