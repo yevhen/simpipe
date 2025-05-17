@@ -19,7 +19,7 @@ func (state *PipelineState[T]) advance() *PipelineState[T] {
 	return state.step.Next().State()
 }
 
-func (state *PipelineState[T]) send(message Message[T]) {
+func (state *PipelineState[T]) send(message *Message[T]) {
 	state.step.Send(message)
 }
 
@@ -115,7 +115,7 @@ func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T, mutex *sy
 		return
 	}
 
-	next.send(Message[T]{
+	next.send(&Message[T]{
 		Payload: message,
 		Mutex:   mutex,
 		ack: func(payload *T, mutex *sync.Mutex) {

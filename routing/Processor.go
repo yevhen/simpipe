@@ -12,7 +12,7 @@ type Message[T any] struct {
 }
 
 type Processor[T any] interface {
-	Send(message Message[T])
+	Send(message *Message[T])
 }
 
 type ProcessorCompletion[T any] struct {
@@ -21,11 +21,11 @@ type ProcessorCompletion[T any] struct {
 }
 
 type ActionProcessor[T any] struct {
-	in    chan Message[T]
-	block *blocks.ActionBlock[Message[T]]
+	in    chan *Message[T]
+	block *blocks.ActionBlock[*Message[T]]
 }
 
-func (p *ActionProcessor[T]) Send(message Message[T]) {
+func (p *ActionProcessor[T]) Send(message *Message[T]) {
 	p.in <- message
 }
 
@@ -40,14 +40,14 @@ func Action[T any](parallelism int, action func(message *T)) *ActionProcessor[T]
 func Patch[T any](parallelism int, action func(message T) func(*T)) *ActionProcessor[T] {
 	processor := &ActionProcessor[T]{}
 
-	processor.in = make(chan Message[T])
-	processor.block = &blocks.ActionBlock[Message[T]]{
+	processor.in = make(chan *Message[T])
+	processor.block = &blocks.ActionBlock[*Message[T]]{
 		Input: processor.in,
-		Done: func(message Message[T]) {
+		Done: func(message *Message[T]) {
 			message.ack(message.Payload, message.Mutex)
 		},
 		Parallelism: parallelism,
-		Action: func(message Message[T]) {
+		Action: func(message *Message[T]) {
 			patch := action(*message.Payload)
 			message.Mutex.Lock()
 			defer message.Mutex.Unlock()
