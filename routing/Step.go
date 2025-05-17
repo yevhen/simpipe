@@ -1,7 +1,7 @@
 package routing
 
 type Step[T any] interface {
-	Send(message *Message[T])
+	Send(message Message[T])
 	Link(next Step[T])
 	Next() Step[T]
 	State() *PipelineState[T]
@@ -12,7 +12,7 @@ type ProcessorStep[T any] struct {
 	next      Step[T]
 }
 
-func (step *ProcessorStep[T]) Send(message *Message[T]) {
+func (step *ProcessorStep[T]) Send(message Message[T]) {
 	step.processor.Send(message)
 }
 
@@ -37,7 +37,7 @@ type ForkStep[T any] struct {
 	next       Step[T]
 }
 
-func (step *ForkStep[T]) Send(message *Message[T]) {
+func (step *ForkStep[T]) Send(message Message[T]) {
 	for _, processor := range step.processors {
 		processor.Send(message)
 	}

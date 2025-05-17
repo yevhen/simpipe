@@ -2,6 +2,24 @@ package routing
 
 import "sync"
 
+type PipelineMessage[T any] struct {
+	payload *T
+	mutex   *sync.Mutex
+	ack     func(message *PipelineMessage[T])
+}
+
+func (p *PipelineMessage[T]) Payload() *T {
+	return p.payload
+}
+
+func (p *PipelineMessage[T]) Mutex() *sync.Mutex {
+	return p.mutex
+}
+
+func (p *PipelineMessage[T]) Done() {
+	p.ack(p)
+}
+
 type PipelineState[T any] struct {
 	step      Step[T]
 	remaining *int
@@ -19,14 +37,14 @@ func (state *PipelineState[T]) advance() *PipelineState[T] {
 	return state.step.Next().State()
 }
 
-func (state *PipelineState[T]) send(message *Message[T]) {
+func (state *PipelineState[T]) send(message Message[T]) {
 	state.step.Send(message)
 }
 
 type Pipeline[T any] struct {
 	done        func(message *T)
 	state       map[*T]*PipelineState[T]
-	completions chan *Message[T]
+	completions chan *PipelineMessage[T]
 	first       Step[T]
 	last        Step[T]
 }
@@ -35,7 +53,7 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	pipeline := &Pipeline[T]{
 		done:        done,
 		state:       make(map[*T]*PipelineState[T]),
-		completions: make(chan *Message[T]),
+		completions: make(chan *PipelineMessage[T]),
 	}
 
 	go pipeline.processCompletions()
@@ -43,8 +61,8 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	return pipeline
 }
 
-func (p *Pipeline[T]) trackDone(message *Message[T]) {
-	state := p.state[message.Payload]
+func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
+	state := p.state[message.Payload()]
 	state.done()
 
 	if *state.remaining <= 0 {
@@ -91,10 +109,10 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 
 func (p *Pipeline[T]) Send(message *T) {
 	mutex := &sync.Mutex{}
-	pm := &Message[T]{
-		Payload: message,
-		Mutex:   mutex,
-		ack: func(m *Message[T]) {
+	pm := &PipelineMessage[T]{
+		payload: message,
+		mutex:   mutex,
+		ack: func(m *PipelineMessage[T]) {
 			p.completions <- m
 		},
 	}
@@ -112,12 +130,12 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 	return state
 }
 
-func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *Message[T]) {
+func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *PipelineMessage[T]) {
 	next := state.advance()
-	p.state[message.Payload] = next
+	p.state[message.Payload()] = next
 
 	if next == nil {
-		p.done(message.Payload)
+		p.done(message.Payload())
 		return
 	}
 
