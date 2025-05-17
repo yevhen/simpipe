@@ -29,15 +29,15 @@ func (p *ActionProcessor[T]) Send(message Message[T]) {
 	p.in <- message
 }
 
-func NewActionProcessor[T any](parallelism int, action func(message *T)) *ActionProcessor[T] {
-	return Transform[T](parallelism, func(message T) func(message *T) {
+func Action[T any](parallelism int, action func(message *T)) *ActionProcessor[T] {
+	return Patch[T](parallelism, func(message T) func(message *T) {
 		return func(message *T) {
 			action(message)
 		}
 	})
 }
 
-func Transform[T any](parallelism int, action func(message T) func(*T)) *ActionProcessor[T] {
+func Patch[T any](parallelism int, action func(message T) func(*T)) *ActionProcessor[T] {
 	processor := &ActionProcessor[T]{}
 
 	processor.in = make(chan Message[T])

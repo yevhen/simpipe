@@ -21,7 +21,7 @@ func TestSingleStepPipeline(t *testing.T) {
 		waiter.Done()
 	})
 
-	processor := NewActionProcessor(1, func(message *Item) {
+	processor := Action(1, func(message *Item) {
 		message.Text = "processed"
 	})
 
@@ -45,13 +45,13 @@ func TestMultiStepPipeline(t *testing.T) {
 		waiter.Done()
 	})
 
-	processorA := NewActionProcessor(1, func(message *Item) {
+	processorA := Action(1, func(message *Item) {
 		message.Text += ".A"
 	})
-	processorB := NewActionProcessor(1, func(message *Item) {
+	processorB := Action(1, func(message *Item) {
 		message.Text += ".B"
 	})
-	processorC := NewActionProcessor(1, func(message *Item) {
+	processorC := Action(1, func(message *Item) {
 		message.Text += ".C"
 	})
 
@@ -77,14 +77,14 @@ func TestFork(t *testing.T) {
 		waiter.Done()
 	})
 
-	processorA := NewActionProcessor(1, func(message *Item) {
+	processorA := Action(1, func(message *Item) {
 		message.Text += "A"
 	})
-	processorB := NewActionProcessor(1, func(message *Item) {
+	processorB := Action(1, func(message *Item) {
 		time.Sleep(50)
 		message.Text += "B"
 	})
-	processorC := NewActionProcessor(1, func(message *Item) {
+	processorC := Action(1, func(message *Item) {
 		message.Text += "-C"
 	})
 
@@ -99,7 +99,7 @@ func TestFork(t *testing.T) {
 	assert.Equal(t, "fork-AB-C", completedText, "Should advance to next step only after all forked processors done")
 }
 
-func TestTransform(t *testing.T) {
+func TestPatch(t *testing.T) {
 	message := &Item{"foo"}
 	var waiter sync.WaitGroup
 
@@ -109,7 +109,7 @@ func TestTransform(t *testing.T) {
 		waiter.Done()
 	})
 
-	processor := Transform(1, func(message Item) func(*Item) {
+	processor := Patch(1, func(message Item) func(*Item) {
 		patchedText := message.Text + ".processed"
 		return func(patch *Item) {
 			patch.Text = patchedText
