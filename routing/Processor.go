@@ -8,7 +8,7 @@ import (
 type Message[T any] struct {
 	Mutex   *sync.Mutex
 	Payload *T
-	Ack     func(processor Processor[T], payload *T, mutex *sync.Mutex)
+	Ack     func(payload *T, mutex *sync.Mutex)
 }
 
 type Processor[T any] interface {
@@ -16,9 +16,8 @@ type Processor[T any] interface {
 }
 
 type ProcessorCompletion[T any] struct {
-	message   *T
-	Mutex     *sync.Mutex
-	Processor Processor[T]
+	payload *T
+	mutex   *sync.Mutex
 }
 
 type ActionProcessor[T any] struct {
@@ -45,7 +44,7 @@ func Transform[T any](parallelism int, action func(message T) func(*T)) *ActionP
 	processor.block = &blocks.ActionBlock[Message[T]]{
 		Input: processor.in,
 		Done: func(message Message[T]) {
-			message.Ack(processor, message.Payload, message.Mutex)
+			message.Ack(message.Payload, message.Mutex)
 		},
 		Parallelism: parallelism,
 		Action: func(message Message[T]) {
