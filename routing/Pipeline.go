@@ -44,19 +44,19 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	return pipeline
 }
 
-func (p *Pipeline[T]) trackDone(message *T, mutex *sync.Mutex) {
-	state := p.state[message]
+func (p *Pipeline[T]) trackDone(ack ProcessorCompletion[T]) {
+	state := p.state[ack.Payload]
 	state.done()
 
 	if *state.remaining <= 0 {
-		p.advanceNext(state, message, mutex)
+		p.advanceNext(state, ack.Payload, ack.Mutex)
 	}
 }
 
 func (p *Pipeline[T]) processCompletions() {
 	for {
 		ack := <-p.completions
-		p.trackDone(ack.payload, ack.mutex)
+		p.trackDone(ack)
 	}
 }
 
@@ -116,12 +116,12 @@ func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T, mutex *sy
 	}
 
 	next.send(Message[T]{
-		Mutex:   mutex,
 		Payload: message,
-		Ack: func(payload *T, mutex *sync.Mutex) {
+		Mutex:   mutex,
+		ack: func(payload *T, mutex *sync.Mutex) {
 			p.completions <- ProcessorCompletion[T]{
-				payload: payload,
-				mutex:   mutex,
+				Payload: payload,
+				Mutex:   mutex,
 			}
 		},
 	})

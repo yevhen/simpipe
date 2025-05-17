@@ -110,9 +110,9 @@ func TestTransform(t *testing.T) {
 	})
 
 	processor := Transform(1, func(message Item) func(*Item) {
-		originalText := message.Text
-		return func(update *Item) {
-			update.Text = originalText + ".processed"
+		patchedText := message.Text + ".processed"
+		return func(patch *Item) {
+			patch.Text = patchedText
 		}
 	})
 
