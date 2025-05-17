@@ -17,7 +17,7 @@ func TestExecutesActionOnBatches(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go RunBatchActionBlock(in, done, 2, time.Hour, 1, action)
+	go runBatchActionBlock(in, done, 2, time.Hour, 1, action)
 
 	for i := 0; i < itemCount; i++ {
 		in <- fmt.Sprintf("i%d", i+1)
@@ -28,4 +28,23 @@ func TestExecutesActionOnBatches(t *testing.T) {
 
 	assert.ElementsMatch(t, []string{"i1", "i2"}, batch0)
 	assert.ElementsMatch(t, []string{"i3", "i4"}, batch1)
+}
+
+func runBatchActionBlock[T any](
+	in chan T,
+	done func(item T),
+	batchSize int,
+	flushTimeout time.Duration,
+	parallelism int,
+	action func(batch []T),
+) {
+	block := &BatchActionBlock[T]{
+		Input:        in,
+		Done:         done,
+		BatchSize:    batchSize,
+		FlushTimeout: flushTimeout,
+		Parallelism:  parallelism,
+		Action:       action,
+	}
+	block.Run()
 }

@@ -19,17 +19,3 @@ func (block *ActionBlock[T]) process() {
 		block.Done(item)
 	}
 }
-
-func CreateActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) *ActionBlock[T] {
-	return &ActionBlock[T]{
-		Input:       in,
-		Done:        done,
-		Parallelism: parallelism,
-		Action:      action,
-	}
-}
-
-func RunActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) {
-	block := CreateActionBlock(in, done, parallelism, action)
-	block.Run()
-}
