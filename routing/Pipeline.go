@@ -1,5 +1,7 @@
 package routing
 
+import "sync"
+
 type PipelineState[T any] struct {
 	step      Step[T]
 	remaining *int
@@ -42,19 +44,19 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	return pipeline
 }
 
-func (p *Pipeline[T]) trackDone(message *T) {
+func (p *Pipeline[T]) trackDone(message *T, mutex *sync.Mutex) {
 	state := p.state[message]
 	state.done()
 
 	if *state.remaining <= 0 {
-		p.advanceNext(state, message)
+		p.advanceNext(state, message, mutex)
 	}
 }
 
 func (p *Pipeline[T]) processCompletions() {
 	for {
 		ack := <-p.completions
-		p.trackDone(ack.message)
+		p.trackDone(ack.message, ack.Mutex)
 	}
 }
 
@@ -89,9 +91,10 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) Send(message *T) {
+	mut := &sync.Mutex{}
 	state := p.start()
 
-	p.advanceNext(state, message)
+	p.advanceNext(state, message, mut)
 }
 
 func (p *Pipeline[T]) start() *PipelineState[T] {
@@ -103,7 +106,7 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 	return state
 }
 
-func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
+func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T, mutex *sync.Mutex) {
 	next := state.advance()
 	p.state[message] = next
 
@@ -113,10 +116,12 @@ func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T) {
 	}
 
 	next.send(Message[T]{
+		Mutex:   mutex,
 		Payload: message,
-		Ack: func(processor Processor[T], payload *T) {
+		Ack: func(processor Processor[T], payload *T, mutex *sync.Mutex) {
 			p.completions <- ProcessorCompletion[T]{
 				message:   payload,
+				Mutex:     mutex,
 				Processor: processor,
 			}
 		},

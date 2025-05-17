@@ -98,3 +98,30 @@ func TestFork(t *testing.T) {
 	assert.Equal(t, "fork-AB-C", message.Text)
 	assert.Equal(t, "fork-AB-C", completedText, "Should advance to next step only after all forked processors done")
 }
+
+func TestTransform(t *testing.T) {
+	message := &Item{"foo"}
+	var waiter sync.WaitGroup
+
+	var completed *Item
+	pipeline := NewPipeline(func(message *Item) {
+		completed = message
+		waiter.Done()
+	})
+
+	processor := Transform(1, func(message Item) func(*Item) {
+		originalText := message.Text
+		return func(update *Item) {
+			update.Text = originalText + ".processed"
+		}
+	})
+
+	pipeline.AddProcessor(processor)
+
+	waiter.Add(1)
+	pipeline.Send(message)
+	waiter.Wait()
+
+	assert.Equal(t, "foo.processed", message.Text)
+	assert.Equal(t, message, completed)
+}

@@ -1,10 +1,14 @@
 package routing
 
-import "simpipe/blocks"
+import (
+	"simpipe/blocks"
+	"sync"
+)
 
 type Message[T any] struct {
+	Mutex   *sync.Mutex
 	Payload *T
-	Ack     func(processor Processor[T], payload *T)
+	Ack     func(processor Processor[T], payload *T, mutex *sync.Mutex)
 }
 
 type Processor[T any] interface {
@@ -13,6 +17,7 @@ type Processor[T any] interface {
 
 type ProcessorCompletion[T any] struct {
 	message   *T
+	Mutex     *sync.Mutex
 	Processor Processor[T]
 }
 
@@ -26,16 +31,29 @@ func (p *ActionProcessor[T]) Send(message Message[T]) {
 }
 
 func NewActionProcessor[T any](parallelism int, action func(message *T)) *ActionProcessor[T] {
+	return Transform[T](parallelism, func(message T) func(message *T) {
+		return func(message *T) {
+			action(message)
+		}
+	})
+}
+
+func Transform[T any](parallelism int, action func(message T) func(*T)) *ActionProcessor[T] {
 	processor := &ActionProcessor[T]{}
 
 	processor.in = make(chan Message[T])
 	processor.block = &blocks.ActionBlock[Message[T]]{
 		Input: processor.in,
 		Done: func(message Message[T]) {
-			message.Ack(processor, message.Payload)
+			message.Ack(processor, message.Payload, message.Mutex)
 		},
 		Parallelism: parallelism,
-		Action:      func(message Message[T]) { action(message.Payload) },
+		Action: func(message Message[T]) {
+			patch := action(*message.Payload)
+			message.Mutex.Lock()
+			defer message.Mutex.Unlock()
+			patch(message.Payload)
+		},
 	}
 
 	processor.block.Run()
