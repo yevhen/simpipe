@@ -1,36 +1,29 @@
 package routing
 
-import "sync"
-
 type PipelineMessage[T any] struct {
 	state   *PipelineState[T]
 	payload *T
-	mutex   *sync.Mutex
-	patches []func(*T)
+	pending []func(*T)
 	ack     func(message *PipelineMessage[T])
 }
 
-func (p *PipelineMessage[T]) Payload() *T {
-	return p.payload
+func (pm *PipelineMessage[T]) Payload() *T {
+	return pm.payload
 }
 
-func (p *PipelineMessage[T]) Apply(action func(T) func(*T)) {
-	patch := action(*p.payload)
+func (pm *PipelineMessage[T]) Apply(action func(T) func(*T)) {
+	patch := action(*pm.payload)
 
-	if *p.state.remaining > 0 {
-		patches := p.patches
-		if patches == nil {
-			patches = make([]func(*T), 0)
-		}
-		p.patches = append(patches, patch)
+	if *pm.state.remaining == 0 {
+		patch(pm.payload)
 		return
 	}
 
-	patch(p.payload)
+	pm.pending = append(pm.pending, patch)
 }
 
-func (p *PipelineMessage[T]) Done() {
-	p.ack(p)
+func (pm *PipelineMessage[T]) Done() {
+	pm.ack(pm)
 }
 
 type PipelineState[T any] struct {
@@ -71,9 +64,21 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
 	*message.state.remaining--
 
-	if *message.state.remaining <= 0 {
-		p.advanceNext(message.state, message)
+	if *message.state.remaining > 0 {
+		return
 	}
+
+	message.applyPendingPatches()
+
+	p.advanceNext(message.state, message)
+}
+
+func (pm *PipelineMessage[T]) applyPendingPatches() {
+	for _, patch := range pm.pending {
+		patch(pm.Payload())
+	}
+
+	pm.pending = pm.pending[:0]
 }
 
 func (p *Pipeline[T]) processCompletions() {
@@ -114,16 +119,15 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) Send(message *T) {
-	mutex := &sync.Mutex{}
 	pm := &PipelineMessage[T]{
 		payload: message,
-		mutex:   mutex,
 		ack: func(m *PipelineMessage[T]) {
 			p.completions <- m
 		},
 	}
 
 	state := p.start()
+
 	p.advanceNext(state, pm)
 }
 
@@ -139,13 +143,6 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *PipelineMessage[T]) {
 	next := state.advance()
 	message.state = next
-
-	if len(message.patches) > 0 {
-		for _, patch := range message.patches {
-			patch(message.Payload())
-		}
-		message.patches = message.patches[:0]
-	}
 
 	if next == nil {
 		p.done(message.Payload())
