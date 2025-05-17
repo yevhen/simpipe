@@ -24,10 +24,9 @@ func (state *PipelineState[T]) send(message *Message[T]) {
 }
 
 type Pipeline[T any] struct {
-	processors  []*Processor[T]
 	done        func(message *T)
 	state       map[*T]*PipelineState[T]
-	completions chan ProcessorCompletion[T]
+	completions chan *Message[T]
 	first       Step[T]
 	last        Step[T]
 }
@@ -36,7 +35,7 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	pipeline := &Pipeline[T]{
 		done:        done,
 		state:       make(map[*T]*PipelineState[T]),
-		completions: make(chan ProcessorCompletion[T]),
+		completions: make(chan *Message[T]),
 	}
 
 	go pipeline.processCompletions()
@@ -44,12 +43,12 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	return pipeline
 }
 
-func (p *Pipeline[T]) trackDone(ack ProcessorCompletion[T]) {
-	state := p.state[ack.Payload]
+func (p *Pipeline[T]) trackDone(message *Message[T]) {
+	state := p.state[message.Payload]
 	state.done()
 
 	if *state.remaining <= 0 {
-		p.advanceNext(state, ack.Payload, ack.Mutex)
+		p.advanceNext(state, message)
 	}
 }
 
@@ -91,10 +90,17 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) Send(message *T) {
-	mut := &sync.Mutex{}
-	state := p.start()
+	mutex := &sync.Mutex{}
+	pm := &Message[T]{
+		Payload: message,
+		Mutex:   mutex,
+		ack: func(m *Message[T]) {
+			p.completions <- m
+		},
+	}
 
-	p.advanceNext(state, message, mut)
+	state := p.start()
+	p.advanceNext(state, pm)
 }
 
 func (p *Pipeline[T]) start() *PipelineState[T] {
@@ -106,23 +112,14 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 	return state
 }
 
-func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *T, mutex *sync.Mutex) {
+func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *Message[T]) {
 	next := state.advance()
-	p.state[message] = next
+	p.state[message.Payload] = next
 
 	if next == nil {
-		p.done(message)
+		p.done(message.Payload)
 		return
 	}
 
-	next.send(&Message[T]{
-		Payload: message,
-		Mutex:   mutex,
-		ack: func(payload *T, mutex *sync.Mutex) {
-			p.completions <- ProcessorCompletion[T]{
-				Payload: payload,
-				Mutex:   mutex,
-			}
-		},
-	})
+	next.send(message)
 }

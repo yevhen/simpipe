@@ -8,16 +8,11 @@ import (
 type Message[T any] struct {
 	Payload *T
 	Mutex   *sync.Mutex
-	ack     func(payload *T, mutex *sync.Mutex)
+	ack     func(message *Message[T])
 }
 
 type Processor[T any] interface {
 	Send(message *Message[T])
-}
-
-type ProcessorCompletion[T any] struct {
-	Payload *T
-	Mutex   *sync.Mutex
 }
 
 type ActionProcessor[T any] struct {
@@ -44,7 +39,7 @@ func Patch[T any](parallelism int, action func(message T) func(*T)) *ActionProce
 	processor.block = &blocks.ActionBlock[*Message[T]]{
 		Input: processor.in,
 		Done: func(message *Message[T]) {
-			message.ack(message.Payload, message.Mutex)
+			message.ack(message)
 		},
 		Parallelism: parallelism,
 		Action: func(message *Message[T]) {
