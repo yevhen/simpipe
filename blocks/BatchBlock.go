@@ -45,6 +45,7 @@ func (block *BatchBlock[T]) flushByTimer() {
 		block.batchFlushed = false
 		return
 	}
+
 	block.flushBuffer()
 }
 
@@ -53,10 +54,9 @@ func (block *BatchBlock[T]) flushBuffer() {
 		return
 	}
 
-	batch := make([]T, len(block.buffer))
-	copy(batch, block.buffer)
+	batch := block.buffer
+	block.buffer = make([]T, 0, block.BatchSize)
 
-	block.buffer = block.buffer[:0]
 	block.Done(batch)
 }
 

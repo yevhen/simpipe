@@ -78,7 +78,7 @@ func (pm *PipelineMessage[T]) applyPendingPatches() {
 		patch(pm.Payload())
 	}
 
-	pm.pending = pm.pending[:0]
+	pm.pending = nil
 }
 
 func (p *Pipeline[T]) processCompletions() {
