@@ -23,3 +23,6 @@ go.work
 # macOS Finder directory metadata
 .DS_Store
 /.history/
+/.clj-kondo/
+/.idea/
+/.lsp/
