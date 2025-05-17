@@ -6,6 +6,7 @@ type PipelineMessage[T any] struct {
 	state   *PipelineState[T]
 	payload *T
 	mutex   *sync.Mutex
+	patches []func(*T)
 	ack     func(message *PipelineMessage[T])
 }
 
@@ -15,8 +16,16 @@ func (p *PipelineMessage[T]) Payload() *T {
 
 func (p *PipelineMessage[T]) Apply(action func(T) func(*T)) {
 	patch := action(*p.payload)
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+
+	if *p.state.remaining > 0 {
+		patches := p.patches
+		if patches == nil {
+			patches = make([]func(*T), 0)
+		}
+		p.patches = append(patches, patch)
+		return
+	}
+
 	patch(p.payload)
 }
 
@@ -27,10 +36,6 @@ func (p *PipelineMessage[T]) Done() {
 type PipelineState[T any] struct {
 	step      Step[T]
 	remaining *int
-}
-
-func (state *PipelineState[T]) done() {
-	*state.remaining--
 }
 
 func (state *PipelineState[T]) advance() *PipelineState[T] {
@@ -64,11 +69,10 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	state := message.state
-	state.done()
+	*message.state.remaining--
 
-	if *state.remaining <= 0 {
-		p.advanceNext(state, message)
+	if *message.state.remaining <= 0 {
+		p.advanceNext(message.state, message)
 	}
 }
 
@@ -135,6 +139,13 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *PipelineMessage[T]) {
 	next := state.advance()
 	message.state = next
+
+	if len(message.patches) > 0 {
+		for _, patch := range message.patches {
+			patch(message.Payload())
+		}
+		message.patches = message.patches[:0]
+	}
 
 	if next == nil {
 		p.done(message.Payload())

@@ -81,7 +81,7 @@ func TestFork(t *testing.T) {
 		message.Text += "A"
 	})
 	processorB := Action(1, func(message *Item) {
-		time.Sleep(50)
+		time.Sleep(100)
 		message.Text += "B"
 	})
 	processorC := Action(1, func(message *Item) {
