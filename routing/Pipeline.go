@@ -14,7 +14,7 @@ func (pm *PipelineMessage[T]) Payload() *T {
 func (pm *PipelineMessage[T]) Apply(action func(T) func(*T)) {
 	patch := action(*pm.payload)
 
-	if *pm.state.remaining == 0 {
+	if pm.state.remaining == 0 {
 		patch(pm.payload)
 		return
 	}
@@ -28,7 +28,7 @@ func (pm *PipelineMessage[T]) Done() {
 
 type PipelineState[T any] struct {
 	step      Step[T]
-	remaining *int
+	remaining int
 }
 
 func (state *PipelineState[T]) advance() *PipelineState[T] {
@@ -62,15 +62,14 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	*message.state.remaining--
-
-	if *message.state.remaining > 0 {
+	message.state.remaining--
+	if message.state.remaining > 0 {
 		return
 	}
 
 	message.applyPendingPatches()
 
-	p.advanceNext(message.state, message)
+	p.advanceNext(message)
 }
 
 func (pm *PipelineMessage[T]) applyPendingPatches() {
@@ -126,9 +125,9 @@ func (p *Pipeline[T]) Send(message *T) {
 		},
 	}
 
-	state := p.start()
+	pm.state = p.start()
 
-	p.advanceNext(state, pm)
+	p.advanceNext(pm)
 }
 
 func (p *Pipeline[T]) start() *PipelineState[T] {
@@ -140,8 +139,8 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 	return state
 }
 
-func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *PipelineMessage[T]) {
-	next := state.advance()
+func (p *Pipeline[T]) advanceNext(message *PipelineMessage[T]) {
+	next := message.state.advance()
 	message.state = next
 
 	if next == nil {

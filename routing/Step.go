@@ -25,10 +25,9 @@ func (step *ProcessorStep[T]) Next() Step[T] {
 }
 
 func (step *ProcessorStep[T]) State() *PipelineState[T] {
-	processorCount := 0
 	return &PipelineState[T]{
 		step:      step,
-		remaining: &processorCount,
+		remaining: 0,
 	}
 }
 
@@ -52,9 +51,8 @@ func (step *ForkStep[T]) Next() Step[T] {
 }
 
 func (step *ForkStep[T]) State() *PipelineState[T] {
-	processorCount := len(step.processors)
 	return &PipelineState[T]{
 		step:      step,
-		remaining: &processorCount,
+		remaining: len(step.processors),
 	}
 }
