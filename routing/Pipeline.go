@@ -13,8 +13,11 @@ func (p *PipelineMessage[T]) Payload() *T {
 	return p.payload
 }
 
-func (p *PipelineMessage[T]) Mutex() *sync.Mutex {
-	return p.mutex
+func (p *PipelineMessage[T]) Apply(action func(T) func(*T)) {
+	patch := action(*p.payload)
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	patch(p.payload)
 }
 
 func (p *PipelineMessage[T]) Done() {

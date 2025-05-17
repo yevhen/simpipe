@@ -2,12 +2,11 @@ package routing
 
 import (
 	"simpipe/blocks"
-	"sync"
 )
 
 type Message[T any] interface {
 	Payload() *T
-	Mutex() *sync.Mutex
+	Apply(func(T) func(*T))
 	Done()
 }
 
@@ -43,10 +42,7 @@ func Patch[T any](parallelism int, action func(message T) func(*T)) *ActionProce
 		},
 		Parallelism: parallelism,
 		Action: func(message Message[T]) {
-			patch := action(*message.Payload())
-			message.Mutex().Lock()
-			defer message.Mutex().Unlock()
-			patch(message.Payload())
+			message.Apply(action)
 		},
 	}
 
