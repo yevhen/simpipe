@@ -4,14 +4,12 @@ A simple, powerful pipeline library for Go that provides building blocks for con
 
 ## Overview
 
-Simpipe is a Go library that implements the pipeline pattern for parallel data processing. It provides a set of composable components to create efficient data processing workflows with support for:
+Simpipe is a Go library that implements the pipeline pattern for high-performant data processing. It provides a set of composable components to create efficient data processing workflows with support for:
 
-- Parallel processing
-- Item batching
-- Time-based flushing
-- Pipeline chaining and forking
-- Thread-safe message passing
-- Strong typing via Go generics
+- Low-level concurrency primitives 
+- Item batching with size and timeout-based flushing
+- Processor chaining with conditional routing and filtering
+- Support for concurrent processor execution
 
 ## Installation
 
@@ -37,14 +35,11 @@ import "simpipe/blocks"
 
 // Create and run an ActionBlock that processes items with parallelism of 2
 in := make(chan string)
-done := func(item string) { fmt.Println("Done:", item) }
-action := func(item string) { fmt.Println("Processing:", item) }
-
 block := &blocks.ActionBlock[string]{
     Input:       in,
-    Done:        done,
     Parallelism: 2,
-    Action:      action,
+    Action:      func(item string) { fmt.Println("Processing:", item) },
+    Done:        func(item string) { fmt.Println("Done:", item) },
 }
 block.Run()
 
@@ -52,44 +47,6 @@ block.Run()
 in <- "item1"
 in <- "item2"
 ```
-
-#### BatchBlock
-
-Accumulates items from an input channel into batches based on either batch size or flush timeout.
-
-```go
-import (
-    "simpipe/blocks"
-    "time"
-)
-
-// Create and run a BatchBlock that collects items into batches of 10
-// or flushes every 5 seconds, whichever comes first
-in := make(chan string)
-done := func(batch []string) { fmt.Println("Batch size:", len(batch)) }
-batchSize := 10
-flushTimeout := 5 * time.Second
-
-block := &blocks.BatchBlock[string]{
-    Input:        in,
-    Done:         done,
-    BatchSize:    batchSize,
-    FlushTimeout: flushTimeout,
-    buffer:       make([]string, 0, batchSize),
-    timer:        time.NewTicker(flushTimeout),
-}
-block.Run()
-
-// Send items to the block
-in <- "item1"
-in <- "item2"
-// ...
-```
-
-The `BatchBlock` features:
-- Collecting items into batches of specified size
-- Time-based flushing of incomplete batches
-- Automatic flushing when input channel is closed
 
 #### BatchActionBlock
 
@@ -103,19 +60,13 @@ import (
 
 // Create and run a BatchActionBlock
 in := make(chan string)
-action := func(batch []string) { fmt.Println("Processing batch of size:", len(batch)) }
-done := func(item string) { fmt.Println("Done processing:", item) }
-batchSize := 10
-flushTimeout := 5 * time.Second
-parallelism := 2
-
 block := &blocks.BatchActionBlock[string]{
     Input:        in,
-    Done:         done,
-    BatchSize:    batchSize,
-    FlushTimeout: flushTimeout,
-    Parallelism:  parallelism,
-    Action:       action,
+    BatchSize:    10,
+    FlushTimeout:  5 * time.Second,
+    Parallelism:  2,
+    Action:       func(batch []string) { fmt.Println("Processing batch of size:", len(batch)) },
+    Done:         func(batch []string) { fmt.Println("Done batch") },	
 }
 block.Run()
 
@@ -151,11 +102,11 @@ pipeline := routing.NewPipeline(func(message *Item) {
 })
 
 // Add processors to the pipeline
-processor1 := routing.NewActionProcessor(1, func(message *Item) {
+processor1 := routing.Action(1, func(message *Item) {
     message.Text += ".step1"
 })
 
-processor2 := routing.NewActionProcessor(1, func(message *Item) {
+processor2 := routing.Action(1, func(message *Item) {
     message.Text += ".step2"
 })
 
@@ -177,15 +128,15 @@ pipeline := routing.NewPipeline(func(message *Item) {
     fmt.Println("Pipeline completed with:", message.Text)
 })
 
-// Create processors for parallel execution
-processorA := routing.Transform(1, func(message Item) func(*Item) {
+// Create special patch processors for tread-safe parallel execution
+processorA := routing.Patch(1, func(message Item) func(*Item) {
     patchedText := message.Text + ".A"
     return func(patch *Item) {
         patch.Text = patchedText
     }
 })
 
-processorB := routing.Transform(1, func(message Item) func(*Item) {
+processorB := routing.Patch(1, func(message Item) func(*Item) {
     patchedText := message.Text + ".B"
     return func(patch *Item) {
         patch.Text = patchedText
@@ -193,7 +144,7 @@ processorB := routing.Transform(1, func(message Item) func(*Item) {
 })
 
 // Add a processor that will be called after the all forked processors are done
-finalProcessor := routing.NewActionProcessor(1, func(message *Item) {
+finalProcessor := routing.Action(1, func(message *Item) {
     message.Text += ".final"
 })
 
@@ -235,14 +186,14 @@ func main() {
     })
     
     // Create processors
-    errorProcessor := routing.NewActionProcessor(2, func(entry *LogEntry) {
+    errorProcessor := routing.Action(2, func(entry *LogEntry) {
         if entry.Level == "ERROR" {
             fmt.Printf("ERROR: %s\n", entry.Message)
             time.Sleep(100 * time.Millisecond) // Simulate processing
         }
     })
     
-    warningProcessor := routing.NewActionProcessor(1, func(entry *LogEntry) {
+    warningProcessor := routing.Action(1, func(entry *LogEntry) {
         if entry.Level == "WARNING" {
             fmt.Printf("WARNING: %s\n", entry.Message)
             time.Sleep(50 * time.Millisecond) // Simulate processing
@@ -253,7 +204,7 @@ func main() {
     pipeline.AddFork(errorProcessor, warningProcessor)
     
     // Add a final processor
-    finalProcessor := routing.NewActionProcessor(1, func(entry *LogEntry) {
+    finalProcessor := routing.Action(1, func(entry *LogEntry) {
         entry.Message += " [PROCESSED]"
     })
     pipeline.AddProcessor(finalProcessor)
@@ -267,7 +218,7 @@ func main() {
     
     wg.Add(len(logs))
     for i := range logs {
-        // Need to send pointer to the log entry
+        // Need to send a pointer to the log entry
         pipeline.Send(&logs[i])
     }
     
