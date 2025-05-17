@@ -3,6 +3,7 @@ package routing
 import "sync"
 
 type PipelineMessage[T any] struct {
+	state   *PipelineState[T]
 	payload *T
 	mutex   *sync.Mutex
 	ack     func(message *PipelineMessage[T])
@@ -43,7 +44,6 @@ func (state *PipelineState[T]) send(message Message[T]) {
 
 type Pipeline[T any] struct {
 	done        func(message *T)
-	state       map[*T]*PipelineState[T]
 	completions chan *PipelineMessage[T]
 	first       Step[T]
 	last        Step[T]
@@ -52,7 +52,6 @@ type Pipeline[T any] struct {
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	pipeline := &Pipeline[T]{
 		done:        done,
-		state:       make(map[*T]*PipelineState[T]),
 		completions: make(chan *PipelineMessage[T]),
 	}
 
@@ -62,7 +61,7 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	state := p.state[message.Payload()]
+	state := message.state
 	state.done()
 
 	if *state.remaining <= 0 {
@@ -132,7 +131,7 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 
 func (p *Pipeline[T]) advanceNext(state *PipelineState[T], message *PipelineMessage[T]) {
 	next := state.advance()
-	p.state[message.Payload()] = next
+	message.state = next
 
 	if next == nil {
 		p.done(message.Payload())
