@@ -3,7 +3,6 @@ package routing
 type PipelineMessage[T any] struct {
 	state   *PipelineState[T]
 	payload *T
-	pending []func(*T)
 	ack     func(message *PipelineMessage[T])
 }
 
@@ -12,14 +11,7 @@ func (pm *PipelineMessage[T]) Payload() *T {
 }
 
 func (pm *PipelineMessage[T]) Apply(action func(T) func(*T)) {
-	patch := action(*pm.payload)
-
-	if pm.state.remaining == 0 {
-		patch(pm.payload)
-		return
-	}
-
-	pm.pending = append(pm.pending, patch)
+	pm.state.Apply(pm.payload, action)
 }
 
 func (pm *PipelineMessage[T]) Done() {
@@ -29,6 +21,34 @@ func (pm *PipelineMessage[T]) Done() {
 type PipelineState[T any] struct {
 	step      Step[T]
 	remaining int
+	pending   []func(*T)
+}
+
+func (state *PipelineState[T]) Apply(payload *T, action func(T) func(*T)) {
+	patch := action(*payload)
+
+	if state.remaining == 0 {
+		patch(payload)
+		return
+	}
+
+	state.pending = append(state.pending, patch)
+}
+
+func (state *PipelineState[T]) trackDone(payload *T) bool {
+	state.remaining--
+	if state.remaining > 0 {
+		return false
+	}
+
+	state.applyPendingPatches(payload)
+	return true
+}
+
+func (state *PipelineState[T]) applyPendingPatches(payload *T) {
+	for _, patch := range state.pending {
+		patch(payload)
+	}
 }
 
 func (state *PipelineState[T]) advance() *PipelineState[T] {
@@ -62,22 +82,10 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	message.state.remaining--
-	if message.state.remaining > 0 {
-		return
+	done := message.state.trackDone(message.payload)
+	if done {
+		p.advanceNext(message)
 	}
-
-	message.applyPendingPatches()
-
-	p.advanceNext(message)
-}
-
-func (pm *PipelineMessage[T]) applyPendingPatches() {
-	for _, patch := range pm.pending {
-		patch(pm.Payload())
-	}
-
-	pm.pending = nil
 }
 
 func (p *Pipeline[T]) processCompletions() {
@@ -143,7 +151,7 @@ func (p *Pipeline[T]) advanceNext(message *PipelineMessage[T]) {
 	next := message.state.advance()
 	message.state = next
 
-	if next == nil {
+	if message.state == nil {
 		p.done(message.Payload())
 		return
 	}
