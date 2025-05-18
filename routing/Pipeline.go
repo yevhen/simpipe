@@ -25,17 +25,14 @@ type PipelineState[T any] struct {
 }
 
 func (state *PipelineState[T]) Apply(payload *T, action func(T) func(*T)) {
-	patch := action(*payload)
+	pendingPatch := state.step.Apply(payload, action)
 
-	if state.remaining == 0 {
-		patch(payload)
-		return
+	if pendingPatch != nil {
+		state.pending = append(state.pending, pendingPatch)
 	}
-
-	state.pending = append(state.pending, patch)
 }
 
-func (state *PipelineState[T]) trackDone(payload *T) bool {
+func (state *PipelineState[T]) Done(payload *T) bool {
 	state.remaining--
 	if state.remaining > 0 {
 		return false
@@ -82,7 +79,7 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	done := message.state.trackDone(message.payload)
+	done := message.state.Done(message.payload)
 	if done {
 		p.advanceNext(message)
 	}

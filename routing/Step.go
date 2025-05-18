@@ -5,6 +5,7 @@ type Step[T any] interface {
 	Link(next Step[T])
 	Next() Step[T]
 	State() *PipelineState[T]
+	Apply(payload *T, action func(T) func(*T)) func(*T)
 }
 
 type ProcessorStep[T any] struct {
@@ -31,6 +32,12 @@ func (step *ProcessorStep[T]) State() *PipelineState[T] {
 	}
 }
 
+func (step *ProcessorStep[T]) Apply(payload *T, action func(T) func(*T)) func(*T) {
+	patch := action(*payload)
+	patch(payload)
+	return nil
+}
+
 type ForkStep[T any] struct {
 	processors []Processor[T]
 	next       Step[T]
@@ -55,4 +62,9 @@ func (step *ForkStep[T]) State() *PipelineState[T] {
 		step:      step,
 		remaining: len(step.processors),
 	}
+}
+
+func (step *ForkStep[T]) Apply(payload *T, action func(T) func(*T)) func(*T) {
+	patch := action(*payload)
+	return patch
 }
