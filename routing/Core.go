@@ -1,6 +1,8 @@
 package routing
 
-import "sync"
+import (
+	"sync"
+)
 
 type Message[T any] interface {
 	Payload() *T
@@ -38,7 +40,7 @@ func advance[T any](state PipelineState[T]) PipelineState[T] {
 type PipelineMessage[T any] struct {
 	state   PipelineState[T]
 	payload *T
-	mu      sync.Mutex
+	mu      *sync.Mutex
 	ack     func(message *PipelineMessage[T])
 }
 
@@ -55,6 +57,7 @@ func (pm *PipelineMessage[T]) Done() {
 }
 
 type Pipeline[T any] struct {
+	mutexes     *sync.Pool
 	done        func(message *T)
 	completions chan *PipelineMessage[T]
 	first       Step[T]
@@ -62,7 +65,13 @@ type Pipeline[T any] struct {
 }
 
 func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
+	var mutexPool = &sync.Pool{
+		New: func() any {
+			return new(sync.Mutex)
+		},
+	}
 	pipeline := &Pipeline[T]{
+		mutexes:     mutexPool,
 		done:        done,
 		completions: make(chan *PipelineMessage[T]),
 	}
@@ -119,7 +128,7 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 
 func (p *Pipeline[T]) Send(payload *T) {
 	message := &PipelineMessage[T]{
-		mu:      sync.Mutex{},
+		mu:      p.mutexes.Get().(*sync.Mutex),
 		payload: payload,
 		ack: func(m *PipelineMessage[T]) {
 			p.completions <- m
@@ -142,6 +151,7 @@ func (p *Pipeline[T]) start() PipelineState[T] {
 func (p *Pipeline[T]) advanceNext(message *PipelineMessage[T]) {
 	next := advance(message.state)
 	if next == nil {
+		p.mutexes.Put(message.mu)
 		p.done(message.Payload())
 		return
 	}
