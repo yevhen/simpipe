@@ -45,11 +45,8 @@ func (state *ForkState[T]) Apply(message *PipelineMessage[T], action func(T) fun
 	message.mu.Lock()
 	defer message.mu.Unlock()
 
-	pendingPatch := state.step.Apply(message.payload, action)
-
-	if pendingPatch != nil {
-		state.pending = append(state.pending, pendingPatch)
-	}
+	patch := state.step.Apply(message.payload, action)
+	state.pending = append(state.pending, patch)
 }
 
 func (state *ForkState[T]) ProcessCompletion(message *PipelineMessage[T]) {
@@ -59,16 +56,16 @@ func (state *ForkState[T]) ProcessCompletion(message *PipelineMessage[T]) {
 	state.remaining--
 
 	if state.Completed() {
-		state.applyPendingPatches(message.payload)
+		state.applyPendingPatches(message)
+	}
+}
+
+func (state *ForkState[T]) applyPendingPatches(message *PipelineMessage[T]) {
+	for _, patch := range state.pending {
+		patch(message.payload)
 	}
 }
 
 func (state *ForkState[T]) Completed() bool {
 	return state.remaining <= 0
-}
-
-func (state *ForkState[T]) applyPendingPatches(payload *T) {
-	for _, patch := range state.pending {
-		patch(payload)
-	}
 }
