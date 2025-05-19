@@ -3,7 +3,7 @@ package routing
 import "sync"
 
 type PipelineMessage[T any] struct {
-	state   *PipelineState[T]
+	state   IPipelineState[T]
 	payload *T
 	mu      sync.Mutex
 	ack     func(message *PipelineMessage[T])
@@ -21,10 +21,21 @@ func (pm *PipelineMessage[T]) Done() {
 	pm.ack(pm)
 }
 
+type IPipelineState[T any] interface {
+	Step() Step[T]
+	Send(message Message[T])
+	Apply(message *PipelineMessage[T], action func(T) func(*T))
+	Done(message *PipelineMessage[T]) bool
+}
+
 type PipelineState[T any] struct {
 	step      Step[T]
 	remaining int
 	pending   []func(*T)
+}
+
+func (state *PipelineState[T]) Step() Step[T] {
+	return state.step
 }
 
 func (state *PipelineState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
@@ -57,15 +68,15 @@ func (state *PipelineState[T]) applyPendingPatches(payload *T) {
 	}
 }
 
-func (state *PipelineState[T]) advance() *PipelineState[T] {
-	if state.step.Next() == nil {
+func advance[T any](state IPipelineState[T]) IPipelineState[T] {
+	next := state.Step().Next()
+	if next == nil {
 		return nil
 	}
-
-	return state.step.Next().State()
+	return next.State()
 }
 
-func (state *PipelineState[T]) send(message Message[T]) {
+func (state *PipelineState[T]) Send(message Message[T]) {
 	state.step.Send(message)
 }
 
@@ -154,12 +165,12 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 }
 
 func (p *Pipeline[T]) advanceNext(message *PipelineMessage[T]) {
-	next := message.state.advance()
+	next := advance(message.state)
 	if next == nil {
 		p.done(message.Payload())
 		return
 	}
 
 	message.state = next
-	next.send(message)
+	next.Send(message)
 }
