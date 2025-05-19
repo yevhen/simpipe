@@ -4,7 +4,7 @@ type Step[T any] interface {
 	Send(message Message[T])
 	Link(next Step[T])
 	Next() Step[T]
-	State() *PipelineState[T]
+	State() IPipelineState[T]
 	Apply(payload *T, action func(T) func(*T)) func(*T)
 }
 
@@ -25,10 +25,9 @@ func (step *ProcessorStep[T]) Next() Step[T] {
 	return step.next
 }
 
-func (step *ProcessorStep[T]) State() *PipelineState[T] {
-	return &PipelineState[T]{
-		step:      step,
-		remaining: 0,
+func (step *ProcessorStep[T]) State() IPipelineState[T] {
+	return &ProcessorState[T]{
+		step: step,
 	}
 }
 
@@ -57,8 +56,8 @@ func (step *ForkStep[T]) Next() Step[T] {
 	return step.next
 }
 
-func (step *ForkStep[T]) State() *PipelineState[T] {
-	return &PipelineState[T]{
+func (step *ForkStep[T]) State() IPipelineState[T] {
+	return &ForkState[T]{
 		step:      step,
 		remaining: len(step.processors),
 	}

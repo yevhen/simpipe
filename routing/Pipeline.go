@@ -23,22 +23,37 @@ func (pm *PipelineMessage[T]) Done() {
 
 type IPipelineState[T any] interface {
 	Step() Step[T]
-	Send(message Message[T])
 	Apply(message *PipelineMessage[T], action func(T) func(*T))
 	Done(message *PipelineMessage[T]) bool
 }
 
-type PipelineState[T any] struct {
+type ProcessorState[T any] struct {
+	step Step[T]
+}
+
+func (state *ProcessorState[T]) Step() Step[T] {
+	return state.step
+}
+
+func (state *ProcessorState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
+	state.step.Apply(message.payload, action)
+}
+
+func (state *ProcessorState[T]) Done(_ *PipelineMessage[T]) bool {
+	return true
+}
+
+type ForkState[T any] struct {
 	step      Step[T]
 	remaining int
 	pending   []func(*T)
 }
 
-func (state *PipelineState[T]) Step() Step[T] {
+func (state *ForkState[T]) Step() Step[T] {
 	return state.step
 }
 
-func (state *PipelineState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
+func (state *ForkState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 
@@ -49,7 +64,7 @@ func (state *PipelineState[T]) Apply(message *PipelineMessage[T], action func(T)
 	}
 }
 
-func (state *PipelineState[T]) Done(message *PipelineMessage[T]) bool {
+func (state *ForkState[T]) Done(message *PipelineMessage[T]) bool {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 
@@ -62,7 +77,7 @@ func (state *PipelineState[T]) Done(message *PipelineMessage[T]) bool {
 	return true
 }
 
-func (state *PipelineState[T]) applyPendingPatches(payload *T) {
+func (state *ForkState[T]) applyPendingPatches(payload *T) {
 	for _, patch := range state.pending {
 		patch(payload)
 	}
@@ -74,10 +89,6 @@ func advance[T any](state IPipelineState[T]) IPipelineState[T] {
 		return nil
 	}
 	return next.State()
-}
-
-func (state *PipelineState[T]) Send(message Message[T]) {
-	state.step.Send(message)
 }
 
 type Pipeline[T any] struct {
@@ -155,7 +166,7 @@ func (p *Pipeline[T]) Send(payload *T) {
 	p.advanceNext(message)
 }
 
-func (p *Pipeline[T]) start() *PipelineState[T] {
+func (p *Pipeline[T]) start() IPipelineState[T] {
 	start := &ProcessorStep[T]{
 		processor: nil,
 		next:      p.first,
@@ -172,5 +183,5 @@ func (p *Pipeline[T]) advanceNext(message *PipelineMessage[T]) {
 	}
 
 	message.state = next
-	next.Send(message)
+	next.Step().Send(message)
 }
