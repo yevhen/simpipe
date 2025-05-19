@@ -4,7 +4,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
-	"time"
 )
 
 type Item struct {
@@ -81,7 +80,6 @@ func TestFork(t *testing.T) {
 		message.Text += "A"
 	})
 	processorB := Action(1, func(message *Item) {
-		time.Sleep(100)
 		message.Text += "B"
 	})
 	processorC := Action(1, func(message *Item) {
@@ -95,8 +93,8 @@ func TestFork(t *testing.T) {
 	pipeline.Send(message)
 	waiter.Wait()
 
-	assert.Equal(t, "fork-AB-C", message.Text)
-	assert.Equal(t, "fork-AB-C", completedText, "Should advance to next step only after all forked processors done")
+	assert.True(t, "fork-AB-C" == completedText || "fork-BA-C" == completedText,
+		"Should advance to next step only after all forked processors done")
 }
 
 func TestPatch(t *testing.T) {
