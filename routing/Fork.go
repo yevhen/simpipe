@@ -52,17 +52,19 @@ func (state *ForkState[T]) Apply(message *PipelineMessage[T], action func(T) fun
 	}
 }
 
-func (state *ForkState[T]) Done(message *PipelineMessage[T]) bool {
+func (state *ForkState[T]) ProcessCompletion(message *PipelineMessage[T]) {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 
 	state.remaining--
-	if state.remaining > 0 {
-		return false
-	}
 
-	state.applyPendingPatches(message.payload)
-	return true
+	if state.Completed() {
+		state.applyPendingPatches(message.payload)
+	}
+}
+
+func (state *ForkState[T]) Completed() bool {
+	return state.remaining <= 0
 }
 
 func (state *ForkState[T]) applyPendingPatches(payload *T) {

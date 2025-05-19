@@ -82,6 +82,8 @@ func (state *ProcessorState[T]) Apply(message *PipelineMessage[T], action func(T
 	state.step.Apply(message.payload, action)
 }
 
-func (state *ProcessorState[T]) Done(_ *PipelineMessage[T]) bool {
+func (state *ProcessorState[T]) ProcessCompletion(_ *PipelineMessage[T]) {}
+
+func (state *ProcessorState[T]) Completed() bool {
 	return true
 }

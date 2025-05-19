@@ -23,7 +23,8 @@ type Step[T any] interface {
 type PipelineState[T any] interface {
 	Step() Step[T]
 	Apply(message *PipelineMessage[T], action func(T) func(*T))
-	Done(message *PipelineMessage[T]) bool
+	ProcessCompletion(message *PipelineMessage[T])
+	Completed() bool
 }
 
 func advance[T any](state PipelineState[T]) PipelineState[T] {
@@ -71,9 +72,10 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 	return pipeline
 }
 
-func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	done := message.state.Done(message)
-	if done {
+func (p *Pipeline[T]) processCompletion(message *PipelineMessage[T]) {
+	message.state.ProcessCompletion(message)
+
+	if message.state.Completed() {
 		p.advanceNext(message)
 	}
 }
@@ -81,7 +83,7 @@ func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
 func (p *Pipeline[T]) processCompletions() {
 	for {
 		ack := <-p.completions
-		p.trackDone(ack)
+		p.processCompletion(ack)
 	}
 }
 
@@ -102,15 +104,15 @@ func (p *Pipeline[T]) AddFork(processors ...Processor[T]) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
+	if p.first == nil {
+		p.first = step
+	}
+
 	if p.last != nil {
 		p.last.Link(step)
 	}
 
 	p.last = step
-
-	if p.first == nil {
-		p.first = step
-	}
 
 	return p
 }
