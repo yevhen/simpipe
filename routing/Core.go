@@ -2,6 +2,24 @@ package routing
 
 import "sync"
 
+type Message[T any] interface {
+	Payload() *T
+	Apply(func(T) func(*T))
+	Done()
+}
+
+type Processor[T any] interface {
+	Send(message Message[T])
+}
+
+type Step[T any] interface {
+	Send(message Message[T])
+	Link(next Step[T])
+	Next() Step[T]
+	State() IPipelineState[T]
+	Apply(payload *T, action func(T) func(*T)) func(*T)
+}
+
 type PipelineMessage[T any] struct {
 	state   IPipelineState[T]
 	payload *T
@@ -25,62 +43,6 @@ type IPipelineState[T any] interface {
 	Step() Step[T]
 	Apply(message *PipelineMessage[T], action func(T) func(*T))
 	Done(message *PipelineMessage[T]) bool
-}
-
-type ProcessorState[T any] struct {
-	step Step[T]
-}
-
-func (state *ProcessorState[T]) Step() Step[T] {
-	return state.step
-}
-
-func (state *ProcessorState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
-	state.step.Apply(message.payload, action)
-}
-
-func (state *ProcessorState[T]) Done(_ *PipelineMessage[T]) bool {
-	return true
-}
-
-type ForkState[T any] struct {
-	step      Step[T]
-	remaining int
-	pending   []func(*T)
-}
-
-func (state *ForkState[T]) Step() Step[T] {
-	return state.step
-}
-
-func (state *ForkState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
-	message.mu.Lock()
-	defer message.mu.Unlock()
-
-	pendingPatch := state.step.Apply(message.payload, action)
-
-	if pendingPatch != nil {
-		state.pending = append(state.pending, pendingPatch)
-	}
-}
-
-func (state *ForkState[T]) Done(message *PipelineMessage[T]) bool {
-	message.mu.Lock()
-	defer message.mu.Unlock()
-
-	state.remaining--
-	if state.remaining > 0 {
-		return false
-	}
-
-	state.applyPendingPatches(message.payload)
-	return true
-}
-
-func (state *ForkState[T]) applyPendingPatches(payload *T) {
-	for _, patch := range state.pending {
-		patch(payload)
-	}
 }
 
 func advance[T any](state IPipelineState[T]) IPipelineState[T] {
