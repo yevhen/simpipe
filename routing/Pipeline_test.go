@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
@@ -67,6 +68,16 @@ func TestMultiStepPipeline(t *testing.T) {
 }
 
 func TestFork(t *testing.T) {
+	const maxRuns = 1000
+	for i := 0; i < maxRuns; i++ {
+		t.Run(fmt.Sprintf("Run%d", i+1), func(t *testing.T) {
+			t.Parallel() // Optional: comment this out for serial execution
+			runForkTest(t)
+		})
+	}
+}
+
+func runForkTest(t *testing.T) {
 	message := &Item{"fork-"}
 	var waiter sync.WaitGroup
 
@@ -94,7 +105,7 @@ func TestFork(t *testing.T) {
 	waiter.Wait()
 
 	assert.True(t, "fork-AB-C" == completedText || "fork-BA-C" == completedText,
-		"Should advance to next step only after all forked processors done")
+		"Should advance to next step only after all forked processors done: "+completedText)
 }
 
 func TestPatch(t *testing.T) {

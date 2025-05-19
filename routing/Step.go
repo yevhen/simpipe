@@ -1,5 +1,7 @@
 package routing
 
+import "sync"
+
 type Step[T any] interface {
 	Send(message Message[T])
 	Link(next Step[T])
@@ -29,6 +31,7 @@ func (step *ProcessorStep[T]) State() *PipelineState[T] {
 	return &PipelineState[T]{
 		step:      step,
 		remaining: 0,
+		mu:        sync.Mutex{},
 	}
 }
 
@@ -61,6 +64,7 @@ func (step *ForkStep[T]) State() *PipelineState[T] {
 	return &PipelineState[T]{
 		step:      step,
 		remaining: len(step.processors),
+		mu:        sync.Mutex{},
 	}
 }
 

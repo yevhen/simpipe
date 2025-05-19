@@ -1,5 +1,7 @@
 package routing
 
+import "sync"
+
 type PipelineMessage[T any] struct {
 	state   *PipelineState[T]
 	payload *T
@@ -19,12 +21,16 @@ func (pm *PipelineMessage[T]) Done() {
 }
 
 type PipelineState[T any] struct {
+	mu        sync.Mutex
 	step      Step[T]
 	remaining int
 	pending   []func(*T)
 }
 
 func (state *PipelineState[T]) Apply(payload *T, action func(T) func(*T)) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
 	pendingPatch := state.step.Apply(payload, action)
 
 	if pendingPatch != nil {
@@ -33,6 +39,9 @@ func (state *PipelineState[T]) Apply(payload *T, action func(T) func(*T)) {
 }
 
 func (state *PipelineState[T]) Done(payload *T) bool {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
 	state.remaining--
 	if state.remaining > 0 {
 		return false
