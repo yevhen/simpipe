@@ -5,6 +5,7 @@ import "sync"
 type PipelineMessage[T any] struct {
 	state   *PipelineState[T]
 	payload *T
+	mu      sync.Mutex
 	ack     func(message *PipelineMessage[T])
 }
 
@@ -13,7 +14,7 @@ func (pm *PipelineMessage[T]) Payload() *T {
 }
 
 func (pm *PipelineMessage[T]) Apply(action func(T) func(*T)) {
-	pm.state.Apply(pm.payload, action)
+	pm.state.Apply(pm, action)
 }
 
 func (pm *PipelineMessage[T]) Done() {
@@ -21,33 +22,32 @@ func (pm *PipelineMessage[T]) Done() {
 }
 
 type PipelineState[T any] struct {
-	mu        sync.Mutex
 	step      Step[T]
 	remaining int
 	pending   []func(*T)
 }
 
-func (state *PipelineState[T]) Apply(payload *T, action func(T) func(*T)) {
-	state.mu.Lock()
-	defer state.mu.Unlock()
+func (state *PipelineState[T]) Apply(message *PipelineMessage[T], action func(T) func(*T)) {
+	message.mu.Lock()
+	defer message.mu.Unlock()
 
-	pendingPatch := state.step.Apply(payload, action)
+	pendingPatch := state.step.Apply(message.payload, action)
 
 	if pendingPatch != nil {
 		state.pending = append(state.pending, pendingPatch)
 	}
 }
 
-func (state *PipelineState[T]) Done(payload *T) bool {
-	state.mu.Lock()
-	defer state.mu.Unlock()
+func (state *PipelineState[T]) Done(message *PipelineMessage[T]) bool {
+	message.mu.Lock()
+	defer message.mu.Unlock()
 
 	state.remaining--
 	if state.remaining > 0 {
 		return false
 	}
 
-	state.applyPendingPatches(payload)
+	state.applyPendingPatches(message.payload)
 	return true
 }
 
@@ -88,7 +88,7 @@ func NewPipeline[T any](done func(message *T)) *Pipeline[T] {
 }
 
 func (p *Pipeline[T]) trackDone(message *PipelineMessage[T]) {
-	done := message.state.Done(message.payload)
+	done := message.state.Done(message)
 	if done {
 		p.advanceNext(message)
 	}
@@ -133,6 +133,7 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 
 func (p *Pipeline[T]) Send(message *T) {
 	pm := &PipelineMessage[T]{
+		mu:      sync.Mutex{},
 		payload: message,
 		ack: func(m *PipelineMessage[T]) {
 			p.completions <- m
