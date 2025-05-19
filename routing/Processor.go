@@ -5,16 +5,28 @@ import (
 )
 
 type ActionProcessor[T any] struct {
-	in    chan Message[T]
-	block *blocks.ActionBlock[Message[T]]
+	in     chan Message[T]
+	block  *blocks.ActionBlock[Message[T]]
+	filter func(message *T) bool
 }
 
 func (p *ActionProcessor[T]) Send(message Message[T]) {
+	if !p.filter(message.Payload()) {
+		message.Done()
+		return
+	}
 	p.in <- message
 }
 
 func Action[T any](parallelism int, action func(message *T)) *ActionProcessor[T] {
-	return Patch[T](parallelism, func(message T) func(message *T) {
+	filter := func(message *T) bool {
+		return true
+	}
+	return ActionWithFilter(parallelism, filter, action)
+}
+
+func ActionWithFilter[T any](parallelism int, filter func(message *T) bool, action func(message *T)) *ActionProcessor[T] {
+	return PatchWithFilter[T](parallelism, filter, func(message T) func(message *T) {
 		return func(message *T) {
 			action(message)
 		}
@@ -22,7 +34,16 @@ func Action[T any](parallelism int, action func(message *T)) *ActionProcessor[T]
 }
 
 func Patch[T any](parallelism int, action func(message T) func(*T)) *ActionProcessor[T] {
-	processor := &ActionProcessor[T]{}
+	filter := func(message *T) bool {
+		return true
+	}
+	return PatchWithFilter(parallelism, filter, action)
+}
+
+func PatchWithFilter[T any](parallelism int, filter func(message *T) bool, action func(message T) func(*T)) *ActionProcessor[T] {
+	processor := &ActionProcessor[T]{
+		filter: filter,
+	}
 
 	processor.in = make(chan Message[T])
 	processor.block = &blocks.ActionBlock[Message[T]]{
