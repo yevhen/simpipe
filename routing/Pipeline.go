@@ -131,18 +131,17 @@ func (p *Pipeline[T]) Add(step Step[T]) *Pipeline[T] {
 	return p
 }
 
-func (p *Pipeline[T]) Send(message *T) {
-	pm := &PipelineMessage[T]{
+func (p *Pipeline[T]) Send(payload *T) {
+	message := &PipelineMessage[T]{
 		mu:      sync.Mutex{},
-		payload: message,
+		payload: payload,
 		ack: func(m *PipelineMessage[T]) {
 			p.completions <- m
 		},
 	}
 
-	pm.state = p.start()
-
-	p.advanceNext(pm)
+	message.state = p.start()
+	p.advanceNext(message)
 }
 
 func (p *Pipeline[T]) start() *PipelineState[T] {
@@ -156,12 +155,11 @@ func (p *Pipeline[T]) start() *PipelineState[T] {
 
 func (p *Pipeline[T]) advanceNext(message *PipelineMessage[T]) {
 	next := message.state.advance()
-	message.state = next
-
-	if message.state == nil {
+	if next == nil {
 		p.done(message.Payload())
 		return
 	}
 
+	message.state = next
 	next.send(message)
 }
