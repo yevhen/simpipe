@@ -16,12 +16,26 @@ type Step[T any] interface {
 	Send(message Message[T])
 	Link(next Step[T])
 	Next() Step[T]
-	State() IPipelineState[T]
+	State() PipelineState[T]
 	Apply(payload *T, action func(T) func(*T)) func(*T)
 }
 
+type PipelineState[T any] interface {
+	Step() Step[T]
+	Apply(message *PipelineMessage[T], action func(T) func(*T))
+	Done(message *PipelineMessage[T]) bool
+}
+
+func advance[T any](state PipelineState[T]) PipelineState[T] {
+	next := state.Step().Next()
+	if next == nil {
+		return nil
+	}
+	return next.State()
+}
+
 type PipelineMessage[T any] struct {
-	state   IPipelineState[T]
+	state   PipelineState[T]
 	payload *T
 	mu      sync.Mutex
 	ack     func(message *PipelineMessage[T])
@@ -37,20 +51,6 @@ func (pm *PipelineMessage[T]) Apply(action func(T) func(*T)) {
 
 func (pm *PipelineMessage[T]) Done() {
 	pm.ack(pm)
-}
-
-type IPipelineState[T any] interface {
-	Step() Step[T]
-	Apply(message *PipelineMessage[T], action func(T) func(*T))
-	Done(message *PipelineMessage[T]) bool
-}
-
-func advance[T any](state IPipelineState[T]) IPipelineState[T] {
-	next := state.Step().Next()
-	if next == nil {
-		return nil
-	}
-	return next.State()
 }
 
 type Pipeline[T any] struct {
@@ -128,7 +128,7 @@ func (p *Pipeline[T]) Send(payload *T) {
 	p.advanceNext(message)
 }
 
-func (p *Pipeline[T]) start() IPipelineState[T] {
+func (p *Pipeline[T]) start() PipelineState[T] {
 	start := &ProcessorStep[T]{
 		processor: nil,
 		next:      p.first,

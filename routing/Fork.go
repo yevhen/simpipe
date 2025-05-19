@@ -19,7 +19,7 @@ func (step *ForkStep[T]) Next() Step[T] {
 	return step.next
 }
 
-func (step *ForkStep[T]) State() IPipelineState[T] {
+func (step *ForkStep[T]) State() PipelineState[T] {
 	return &ForkState[T]{
 		step:      step,
 		remaining: len(step.processors),

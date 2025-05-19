@@ -58,7 +58,7 @@ func (step *ProcessorStep[T]) Next() Step[T] {
 	return step.next
 }
 
-func (step *ProcessorStep[T]) State() IPipelineState[T] {
+func (step *ProcessorStep[T]) State() PipelineState[T] {
 	return &ProcessorState[T]{
 		step: step,
 	}
