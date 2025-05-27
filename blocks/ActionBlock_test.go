@@ -14,10 +14,9 @@ func TestExecutesGivenLambdaOnItemReceivedFromChannel(t *testing.T) {
 		result <- item
 	}
 
-	done := func(item string) {}
-
 	in := make(chan string)
-	go runActionBlock(in, done, 1, action)
+	block := NewActionBlock(in, action)
+	go block.Run()
 
 	in <- "bar"
 	in <- "baz"
@@ -37,7 +36,8 @@ func TestPassesItemAfterExecutionToDone(t *testing.T) {
 	}
 
 	in := make(chan *struct{ text string })
-	go runActionBlock(in, done, 1, action)
+	block := NewActionBlock(in, action, WithDoneCallback(done))
+	go block.Run()
 
 	var i1 struct{ text string }
 	i1.text = "bar"
@@ -61,10 +61,9 @@ func TestDegreeOfParallelism(t *testing.T) {
 		waiter.Done()
 	}
 
-	done := func(item string) {}
-
 	in := make(chan string)
-	go runActionBlock(in, done, 2, action)
+	block := NewActionBlock(in, action, WithParallelism[string](2))
+	go block.Run()
 
 	now := time.Now()
 
@@ -73,17 +72,40 @@ func TestDegreeOfParallelism(t *testing.T) {
 	in <- "baz"
 	waiter.Wait()
 
-	elapsed := time.Now().Sub(now)
+	elapsed := time.Since(now)
 
 	assert.InDelta(t, delay.Seconds(), elapsed.Seconds(), delay.Seconds()/2)
 }
 
-func runActionBlock[T any](in chan T, done func(item T), parallelism int, action func(item T)) {
-	block := &ActionBlock[T]{
-		Input:       in,
-		Done:        done,
-		Parallelism: parallelism,
-		Action:      action,
+func TestWithOptionsChaining(t *testing.T) {
+	var waiter sync.WaitGroup
+	var result []string
+	var mu sync.Mutex
+
+	action := func(item string) {
+		mu.Lock()
+		result = append(result, item)
+		mu.Unlock()
+		waiter.Done()
 	}
-	block.Run()
+
+	done := func(item string) {
+		// no-op
+	}
+
+	in := make(chan string)
+	block := NewActionBlock(in, action,
+		WithParallelism[string](2),
+		WithDoneCallback[string](done),
+	)
+	go block.Run()
+
+	waiter.Add(2)
+	in <- "one"
+	in <- "two"
+	waiter.Wait()
+
+	assert.Equal(t, 2, len(result))
+	assert.Contains(t, result, "one")
+	assert.Contains(t, result, "two")
 }
