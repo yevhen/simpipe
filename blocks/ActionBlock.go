@@ -3,15 +3,15 @@ package blocks
 // ActionBlockOption defines a configuration option for an ActionBlock
 type ActionBlockOption[T any] func(*ActionBlock[T])
 
-// WithParallelism returns an option that sets the parallelism level for the ActionBlock
-func WithParallelism[T any](parallelism int) ActionBlockOption[T] {
+// WithActionParallelism returns an option that sets the parallelism level for the ActionBlock
+func WithActionParallelism[T any](parallelism int) ActionBlockOption[T] {
 	return func(block *ActionBlock[T]) {
 		block.Parallelism = parallelism
 	}
 }
 
-// WithDoneCallback returns an option that sets the callback function called after an item is processed
-func WithDoneCallback[T any](done func(item T)) ActionBlockOption[T] {
+// WithActionDoneCallback returns an option that sets the callback function called after an item is processed
+func WithActionDoneCallback[T any](done func(item T)) ActionBlockOption[T] {
 	return func(block *ActionBlock[T]) {
 		block.Done = done
 	}

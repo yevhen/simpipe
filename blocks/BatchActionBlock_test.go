@@ -3,6 +3,7 @@ package blocks
 import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,7 +18,13 @@ func TestExecutesActionOnBatches(t *testing.T) {
 	done := func(item string) {}
 
 	in := make(chan string)
-	go runBatchActionBlock(in, done, 2, time.Hour, 1, action)
+	block := NewBatchActionBlock(in, action,
+		WithBatchActionBatchSize[string](2),
+		WithBatchActionFlushTimeout[string](time.Hour),
+		WithBatchActionParallelism[string](1),
+		WithBatchActionDoneCallback[string](done),
+	)
+	go block.Run()
 
 	for i := 0; i < itemCount; i++ {
 		in <- fmt.Sprintf("i%d", i+1)
@@ -30,21 +37,43 @@ func TestExecutesActionOnBatches(t *testing.T) {
 	assert.ElementsMatch(t, []string{"i3", "i4"}, batch1)
 }
 
-func runBatchActionBlock[T any](
-	in chan T,
-	done func(item T),
-	batchSize int,
-	flushTimeout time.Duration,
-	parallelism int,
-	action func(batch []T),
-) {
-	block := &BatchActionBlock[T]{
-		Input:        in,
-		Done:         done,
-		BatchSize:    batchSize,
-		FlushTimeout: flushTimeout,
-		Parallelism:  parallelism,
-		Action:       action,
+func TestBatchActionBlockWithOptions(t *testing.T) {
+	items := []string{"a", "b", "c", "d"}
+
+	var wg sync.WaitGroup
+	wg.Add(len(items))
+
+	processed := make(map[string]bool)
+	action := func(batch []string) {
+		for _, item := range batch {
+			processed[item] = true
+		}
 	}
-	block.Run()
+
+	done := func(item string) {
+		wg.Done()
+	}
+
+	in := make(chan string)
+	block := NewBatchActionBlock(in, action,
+		WithBatchActionBatchSize[string](len(items)-1),
+		WithBatchActionFlushTimeout[string](250*time.Millisecond),
+		WithBatchActionParallelism[string](len(items)),
+		WithBatchActionDoneCallback[string](done),
+	)
+	go block.Run()
+
+	in <- items[0]
+	in <- items[1]
+	in <- items[2] // Should trigger size-based flush
+	in <- items[3] // Should trigger timeout-based flush
+
+	// Wait for all items to be processed and completed
+	wg.Wait()
+
+	assert.Equal(t, 4, len(processed))
+
+	for _, item := range items {
+		assert.True(t, processed[item], "Item %s should be processed", item)
+	}
 }

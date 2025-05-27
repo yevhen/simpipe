@@ -13,7 +13,12 @@ func TestFlushesBySize(t *testing.T) {
 	}
 
 	in := make(chan string)
-	go runBatchBlock(in, 2, time.Hour, done)
+	block := NewBatchBlock(in,
+		WithBatchSize[string](2),
+		WithBatchFlushTimeout[string](time.Hour),
+		WithBatchDoneCallback[string](done),
+	)
+	go block.Run()
 
 	in <- "bar"
 	in <- "baz"
@@ -30,7 +35,12 @@ func TestFlushesBySizeSequentially(t *testing.T) {
 	}
 
 	in := make(chan string, 2)
-	go runBatchBlock(in, 1, time.Hour, done)
+	block := NewBatchBlock(in,
+		WithBatchSize[string](1),
+		WithBatchFlushTimeout[string](time.Hour),
+		WithBatchDoneCallback[string](done),
+	)
+	go block.Run()
 
 	in <- "bar"
 	in <- "baz"
@@ -51,7 +61,12 @@ func TestFlushesByTimer(t *testing.T) {
 	flushTimeout := 500 * time.Millisecond
 
 	in := make(chan string)
-	go runBatchBlock(in, 2, flushTimeout, done)
+	block := NewBatchBlock(in,
+		WithBatchSize[string](2),
+		WithBatchFlushTimeout[string](flushTimeout),
+		WithBatchDoneCallback[string](done),
+	)
+	go block.Run()
 
 	in <- "bar"
 
@@ -68,7 +83,12 @@ func TestDoesNotFlushesByTimerIfFlushedBySize(t *testing.T) {
 	flushTimeout := time.Second
 
 	in := make(chan string, 3)
-	go runBatchBlock(in, 2, flushTimeout, done)
+	block := NewBatchBlock(in,
+		WithBatchSize[string](2),
+		WithBatchFlushTimeout[string](flushTimeout),
+		WithBatchDoneCallback[string](done),
+	)
+	go block.Run()
 
 	in <- "foo"
 	in <- "bar"
@@ -89,7 +109,12 @@ func TestFlushesOnChannelClose(t *testing.T) {
 	}
 
 	in := make(chan string)
-	go runBatchBlock(in, 2, time.Hour, done)
+	block := NewBatchBlock(in,
+		WithBatchSize[string](2),
+		WithBatchFlushTimeout[string](time.Hour),
+		WithBatchDoneCallback[string](done),
+	)
+	go block.Run()
 
 	in <- "bar"
 	close(in)
@@ -98,14 +123,33 @@ func TestFlushesOnChannelClose(t *testing.T) {
 	assert.Equal(t, "bar", batch[0])
 }
 
-func runBatchBlock[T any](in chan T, batchSize int, flushTimeout time.Duration, done func(batch []T)) {
-	block := &BatchBlock[T]{
-		Input:        in,
-		Done:         done,
-		BatchSize:    batchSize,
-		FlushTimeout: flushTimeout,
-		buffer:       make([]T, 0, batchSize),
-		timer:        time.NewTicker(flushTimeout),
+func TestBatchBlockWithOptions(t *testing.T) {
+	batches := make(chan []string)
+	done := func(batch []string) {
+		batches <- batch
 	}
-	block.Run()
+
+	in := make(chan string)
+	block := NewBatchBlock(in,
+		WithBatchSize[string](3),
+		WithBatchFlushTimeout[string](250*time.Millisecond),
+		WithBatchDoneCallback[string](done),
+	)
+	go block.Run()
+
+	in <- "one"
+	in <- "two"
+	in <- "three" // Should trigger size-based flush
+
+	batch1 := <-batches
+	assert.Equal(t, 3, len(batch1))
+	assert.Equal(t, "one", batch1[0])
+	assert.Equal(t, "two", batch1[1])
+	assert.Equal(t, "three", batch1[2])
+
+	// Test timeout-based flush
+	in <- "four"
+	batch2 := <-batches
+	assert.Equal(t, 1, len(batch2))
+	assert.Equal(t, "four", batch2[0])
 }

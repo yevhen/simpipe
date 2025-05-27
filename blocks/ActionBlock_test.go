@@ -36,7 +36,7 @@ func TestPassesItemAfterExecutionToDone(t *testing.T) {
 	}
 
 	in := make(chan *struct{ text string })
-	block := NewActionBlock(in, action, WithDoneCallback(done))
+	block := NewActionBlock(in, action, WithActionDoneCallback(done))
 	go block.Run()
 
 	var i1 struct{ text string }
@@ -62,7 +62,7 @@ func TestDegreeOfParallelism(t *testing.T) {
 	}
 
 	in := make(chan string)
-	block := NewActionBlock(in, action, WithParallelism[string](2))
+	block := NewActionBlock(in, action, WithActionParallelism[string](2))
 	go block.Run()
 
 	now := time.Now()
@@ -77,7 +77,7 @@ func TestDegreeOfParallelism(t *testing.T) {
 	assert.InDelta(t, delay.Seconds(), elapsed.Seconds(), delay.Seconds()/2)
 }
 
-func TestWithOptionsChaining(t *testing.T) {
+func TestActionBlockWithOptionsChaining(t *testing.T) {
 	var waiter sync.WaitGroup
 	var result []string
 	var mu sync.Mutex
@@ -95,8 +95,8 @@ func TestWithOptionsChaining(t *testing.T) {
 
 	in := make(chan string)
 	block := NewActionBlock(in, action,
-		WithParallelism[string](2),
-		WithDoneCallback[string](done),
+		WithActionParallelism[string](2),
+		WithActionDoneCallback[string](done),
 	)
 	go block.Run()
 
