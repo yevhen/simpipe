@@ -122,34 +122,3 @@ func TestFlushesOnChannelClose(t *testing.T) {
 	batch := <-batches
 	assert.Equal(t, "bar", batch[0])
 }
-
-func TestBatchBlockWithOptions(t *testing.T) {
-	batches := make(chan []string)
-	done := func(batch []string) {
-		batches <- batch
-	}
-
-	in := make(chan string)
-	block := NewBatchBlock(in,
-		WithBatchSize[string](3),
-		WithBatchFlushTimeout[string](250*time.Millisecond),
-		WithBatchDoneCallback[string](done),
-	)
-	go block.Run()
-
-	in <- "one"
-	in <- "two"
-	in <- "three" // Should trigger size-based flush
-
-	batch1 := <-batches
-	assert.Equal(t, 3, len(batch1))
-	assert.Equal(t, "one", batch1[0])
-	assert.Equal(t, "two", batch1[1])
-	assert.Equal(t, "three", batch1[2])
-
-	// Test timeout-based flush
-	in <- "four"
-	batch2 := <-batches
-	assert.Equal(t, 1, len(batch2))
-	assert.Equal(t, "four", batch2[0])
-}

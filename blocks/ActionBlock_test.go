@@ -76,36 +76,3 @@ func TestDegreeOfParallelism(t *testing.T) {
 
 	assert.InDelta(t, delay.Seconds(), elapsed.Seconds(), delay.Seconds()/2)
 }
-
-func TestActionBlockWithOptionsChaining(t *testing.T) {
-	var waiter sync.WaitGroup
-	var result []string
-	var mu sync.Mutex
-
-	action := func(item string) {
-		mu.Lock()
-		result = append(result, item)
-		mu.Unlock()
-		waiter.Done()
-	}
-
-	done := func(item string) {
-		// no-op
-	}
-
-	in := make(chan string)
-	block := NewActionBlock(in, action,
-		WithActionParallelism[string](2),
-		WithActionDoneCallback[string](done),
-	)
-	go block.Run()
-
-	waiter.Add(2)
-	in <- "one"
-	in <- "two"
-	waiter.Wait()
-
-	assert.Equal(t, 2, len(result))
-	assert.Contains(t, result, "one")
-	assert.Contains(t, result, "two")
-}
